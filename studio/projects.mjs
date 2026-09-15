@@ -25,7 +25,20 @@ export function projectDataDirs(project) {
 export function ensureProjectDirs(project) {
   const dirs = projectDataDirs(project);
   for (const dir of Object.values(dirs)) fs.mkdirSync(dir,{recursive:true});
+  ensureGitignored(project.path);
   return dirs;
+}
+
+// If this project folder is a git repository, keep Ghost's own working data
+// (`.ghost/`, session backups, self-improvement history) out of the user's
+// version-controlled changes and Git status view.
+function ensureGitignored(projectPath) {
+  if (!fs.existsSync(path.join(projectPath,'.git'))) return;
+  const gitignorePath = path.join(projectPath,'.gitignore');
+  const existing = fs.existsSync(gitignorePath) ? fs.readFileSync(gitignorePath,'utf8') : '';
+  if (existing.split('\n').some(line => line.trim() === '.ghost/')) return;
+  const prefix = existing && !existing.endsWith('\n') ? '\n' : '';
+  fs.writeFileSync(gitignorePath, `${existing}${prefix}.ghost/\n`);
 }
 
 function fail(message,status=400) { return Object.assign(new Error(message),{status}); }

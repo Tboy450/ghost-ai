@@ -6,6 +6,8 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { listFiles, readFile, saveFile, searchProject, modelStream, BASE_PROMPT } from './core.mjs';
 import { packContext, packAdaptive, PROFILES } from './memory.mjs';
 import { openProject, listProjects, activeProject, switchProject, closeProject, ensureProjectDirs } from './projects.mjs';
+import * as git from './git.mjs';
+import { listProviders, getFocus, setFocus, runCycle, listHistory, PROVIDERS } from './selfimprove.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.dirname(HERE);
@@ -38,6 +40,8 @@ function applyProject(nextProject) {
 }
 applyProject(project || openProject(REGISTRY_PATH, path.join(CONFIG_DIR,'workspace'), 'My workspace'));
 const active = new Set();
+let selfImproveBusy = false;
+const PROVIDERS_SET = new Set(Object.keys(PROVIDERS));
 const idValid = id => typeof id === 'string' && /^[a-z0-9-]{1,80}$/i.test(id);
 function eventLog(type, detail) { fs.appendFileSync(path.join(dirs.ghost,'activity.jsonl'),JSON.stringify({time:new Date().toISOString(),type,detail})+'\n'); }
 function json(res,status,value) { res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'}); res.end(JSON.stringify(value)); }
@@ -197,6 +201,27 @@ const server=http.createServer(async(req,res)=>{
     if (req.method==='POST' && url.pathname==='/api/compare') return await compare(req,res,await body(req));
     if (req.method==='GET' && url.pathname==='/api/runs') return json(res,200,fs.readdirSync(dirs.runs).filter(n=>n.endsWith('.json')).map(n=>JSON.parse(fs.readFileSync(path.join(dirs.runs,n),'utf8'))).sort((a,b)=>b.time.localeCompare(a.time)));
     if (req.method==='GET' && url.pathname==='/api/activity') { const activityPath=path.join(dirs.ghost,'activity.jsonl'); return json(res,200,fs.existsSync(activityPath)?fs.readFileSync(activityPath,'utf8').trim().split('\n').filter(Boolean).map(JSON.parse).reverse().slice(0,100):[]); }
+    if (req.method==='GET' && url.pathname==='/api/git/status') return json(res,200,git.status(rootFor(url.searchParams.get('root')||'workspace')));
+    if (req.method==='GET' && url.pathname==='/api/git/diff') return json(res,200,{diff:git.diff(rootFor(url.searchParams.get('root')||'workspace'),url.searchParams.get('path')||undefined)});
+    if (req.method==='GET' && url.pathname==='/api/git/log') return json(res,200,{commits:git.log(rootFor(url.searchParams.get('root')||'workspace'),Number(url.searchParams.get('limit'))||25)});
+    if (req.method==='POST' && url.pathname==='/api/git/commit') { const input=await body(req); const result=git.commit(rootFor(input.root||'workspace'),input.message); eventLog('git_commit',`${input.root||'workspace'} · ${result.hash.slice(0,7)}`); return json(res,201,result); }
+    if (req.method==='POST' && url.pathname==='/api/git/push') { const input=await body(req); const result=git.push(rootFor(input.root||'workspace'),{remote:input.remote,branch:input.branch}); eventLog('git_push',`${input.root||'workspace'} · ${result.branch}`); return json(res,200,result); }
+    if (req.method==='POST' && url.pathname==='/api/git/restore') { const input=await body(req); const content=git.fileAt(rootFor(input.root||'workspace'),input.hash,input.path); return json(res,200,{path:input.path,content}); }
+    if (req.method==='GET' && url.pathname==='/api/self-improve/providers') return json(res,200,{providers:listProviders()});
+    if (req.method==='GET' && url.pathname==='/api/self-improve/focus') return json(res,200,getFocus(dirs));
+    if (req.method==='PUT' && url.pathname==='/api/self-improve/focus') { const input=await body(req); return json(res,200,setFocus(dirs,input.focus,input.queue)); }
+    if (req.method==='GET' && url.pathname==='/api/self-improve/history') return json(res,200,{cycles:listHistory(dirs)});
+    if (req.method==='POST' && url.pathname==='/api/self-improve/run') {
+      if (selfImproveBusy) throw fail('A self-improvement cycle is already running.',409);
+      const input=await body(req);
+      if (!PROVIDERS_SET.has(input.provider)) throw fail('Choose a supported AI provider.');
+      selfImproveBusy=true;
+      try {
+        const report=await runCycle({codeRoot:ROOT,dirs,providerId:input.provider,apiKey:input.apiKey,model:input.model,autoPush:input.autoPush!==false,focusOverride:input.focus});
+        eventLog('self_improve_cycle',`${input.provider} · ${report.committed?'committed':'no change'}${report.pushed?' · pushed':''}`);
+        return json(res,report.error && !report.committed?200:201,report);
+      } finally { selfImproveBusy=false; }
+    }
     const assets={'/':'index.html','/app.js':'app.js','/diff.js':'diff.js','/highlight.js':'highlight.js','/styles.css':'styles.css','/ghost.css':'ghost.css'};
     if (req.method==='GET' && assets[url.pathname]) {
       const file=assets[url.pathname];res.writeHead(200,{'Content-Type':file.endsWith('.js')?'text/javascript':file.endsWith('.css')?'text/css':'text/html'});return res.end(fs.readFileSync(path.join(HERE,'public',file)));

@@ -18,6 +18,8 @@ Then open **http://127.0.0.1:4317**. The launcher starts the local model engine 
 - Eighteen paired comparison cases, with raw answers and model details saved locally.
 - Memory profiles, pinned requirements, recalled context, and token-budget reporting.
 - An optional local reference archive in the file explorer when present.
+- In-app Git integration: review changes, commit, and push a project's own repository.
+- Optional AI-assisted self-improvement: consult a public AI provider to propose, test, and (only on green tests) commit/push a codebase change to an isolated branch.
 
 ## Fresh installation from source
 
@@ -59,6 +61,34 @@ toggle (`☰`) from filename filtering to full-text search across every file in 
 root. When a chat response's "Use in editor" action would replace the open file's contents, Ghost
 shows a line-by-line diff preview first, so you can review exactly what would change before
 applying it.
+
+## Git
+
+The **Git** view lets you review, commit, and push changes to your active project without
+leaving Ghost: a status list of changed files, a diff viewer, a commit-message box, a Push
+button, and commit history. It works on any project folder that is already a git repository
+(`git init` it first if it isn't). Ghost automatically keeps its own `.ghost/` data folder out
+of your changes by adding it to that project's `.gitignore`.
+
+## Self-improvement
+
+The **Self-improve** view lets Ghost consult a public AI provider — OpenAI (GPT), xAI (Grok),
+DeepSeek, Meta (Llama, via Together.ai), or GitHub Models (Copilot) — to propose a change to
+Ghost's own codebase toward a focus task you set (with a queue of follow-up tasks), and reports
+back after every cycle with what it proposed, whether the tests passed, and whether it was
+committed/pushed.
+
+- A provider only activates once you set its API key as an environment variable before starting
+  Ghost: `GHOST_OPENAI_API_KEY`, `GHOST_XAI_API_KEY`, `GHOST_DEEPSEEK_API_KEY`,
+  `GHOST_TOGETHER_API_KEY` (for Meta/Llama), or `GHOST_GITHUB_TOKEN` (for GitHub Models/Copilot).
+  Ghost never stores or invents these keys.
+- Every cycle runs in a disposable git worktree on an isolated `ghost/self-update` branch — your
+  live working directory and branch are never touched, even mid-cycle.
+- A change is only committed if Ghost's full test suite passes inside that isolated worktree; a
+  commit is only pushed (to that same isolated branch) after it succeeds. A failing or unsafe
+  proposal is discarded and recorded in the cycle's report, nothing is committed.
+- Set the focus/queue and pick a provider in the Self-improve view, then "Run one cycle." Review
+  the report, and merge the `ghost/self-update` branch yourself once you're happy with it.
 
 ## Edit the source
 

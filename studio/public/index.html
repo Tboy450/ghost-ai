@@ -17,6 +17,8 @@
         <button class="nav-item" data-view="compare"><span class="nav-icon">⇄</span> Compare <span class="nav-count">18</span></button>
         <button class="nav-item" data-view="memory"><span class="nav-icon">◈</span> Memory</button>
         <button class="nav-item" data-view="activity"><span class="nav-icon">◷</span> Activity</button>
+        <button class="nav-item" data-view="git"><span class="nav-icon">⎇</span> Git</button>
+        <button class="nav-item" data-view="selfimprove"><span class="nav-icon">✦</span> Self-improve</button>
       </nav>
       <div class="section-label">RECENT <span id="session-count">0</span></div>
       <div id="sessions" class="sessions"></div>
@@ -64,6 +66,33 @@
       </section>
 
       <section id="activity-view" class="view activity-view hidden"><div class="view-heading"><span class="eyebrow">YOUR WORK, REMEMBERED</span><h1>The trail of an idea.</h1><p>Conversations, saved edits, and test runs, all on this computer.</p></div><div id="activity-list"></div></section>
+      <section id="git-view" class="view git-view hidden">
+        <div class="view-heading"><span class="eyebrow">VERSION CONTROL, IN PLACE</span><h1>Review, commit, push.</h1><p>See what changed in this project, save a checkpoint, and share it — without leaving Ghost.</p></div>
+        <div id="git-not-repo" class="memory-help hidden">This project folder isn't a git repository yet. Run <code>git init</code> in it to use this view.</div>
+        <div id="git-panel">
+          <div class="git-toolbar"><button id="git-refresh" class="secondary-button">Refresh</button><span id="git-branch" class="memory-help"></span></div>
+          <div id="git-status-list" class="git-status-list"></div>
+          <div id="git-diff-view" class="diff-view"></div>
+          <div class="git-commit-row"><input id="git-commit-message" placeholder="Describe this checkpoint…" aria-label="Commit message"><button id="git-commit" class="primary-button">Commit</button><button id="git-push" class="secondary-button">Push</button></div>
+          <h3 class="memory-title">History</h3>
+          <div id="git-log" class="git-log"></div>
+        </div>
+      </section>
+      <section id="selfimprove-view" class="view selfimprove-view hidden">
+        <div class="view-heading"><span class="eyebrow">TEACH GHOST TO IMPROVE ITSELF</span><h1>Point it at a focus. Review the report.</h1><p>Ghost asks a public AI model (GPT, Grok, DeepSeek, Meta/Llama, or GitHub Models/Copilot) to propose a change, applies it on an isolated <code>ghost/self-update</code> branch, and only keeps it if the full test suite passes.</p></div>
+        <div class="selfimprove-config">
+          <label>FOCUS<textarea id="si-focus" rows="2" placeholder="What should Ghost work on next?"></textarea></label>
+          <label>QUEUE (one task per line, runs next)<textarea id="si-queue" rows="4"></textarea></label>
+          <button id="si-save-focus" class="secondary-button">Save focus</button>
+        </div>
+        <div class="selfimprove-run">
+          <label>PROVIDER<select id="si-provider" aria-label="AI provider"></select></label>
+          <button id="si-run" class="primary-button">Run one cycle</button>
+          <span id="si-run-status" class="memory-help"></span>
+        </div>
+        <h3 class="memory-title">Cycle history</h3>
+        <div id="si-history" class="si-history"></div>
+      </section>
       <section id="memory-view" class="view memory-view hidden"><div class="view-heading"><span class="eyebrow">LESS WEIGHT. MORE CONTEXT.</span><h1>Keep the thread.</h1><p>Ghost itemizes older context, recalls what fits this request, and keeps your complete conversation on disk.</p></div><div class="memory-control"><label>MEMORY PROFILE<select id="memory-profile"><option value="auto" selected>Auto · fits the smallest profile that works</option><option value="eco">Eco · 4K context</option><option value="balanced">Balanced · 8K context</option><option value="deep">Deep · 12K context</option></select></label><p>Smaller context uses less memory. Larger context keeps more detail, with additional processing time.</p></div><div id="memory-stats" class="memory-stats"><span>Start a conversation to see what Ghost keeps in view.</span></div><h3 class="memory-title">Pinned notes</h3><p class="memory-help">Keep essential requirements close. One note per line; up to 12 notes.</p><textarea id="pinned-notes" aria-label="Pinned memory notes" placeholder="Example: This project uses Python and must work offline." rows="4"></textarea><button id="save-memory" class="primary-button">Save notes</button><h3 class="memory-title">Recalled context</h3><div id="recalled-context"></div></section>
       <footer class="statusbar"><span><span class="tiny-dot"></span> Local workspace</span><span id="footer-status">Ready</span><span>⌘ <span id="file-total">1,902 source files</span></span></footer>
     </main>
