@@ -42,7 +42,14 @@ the remote commit is verified.
   - [x] Broadened constraint detection to catch revision phrasing ("instead", "switch", "actually", "from now on", "change to", "update") in addition to the original "must/never/always/..." set.
   - [x] Memory panel UI (`app.js`) now shows the source timestamp alongside each recalled card's turn id and kind.
   - [x] Tests added to `studio/tests/core.test.mjs`: paraphrased-keyword recall, later-instruction supersession, and source-reference (turn + timestamp) presence. Full suite: `node --test studio/tests/*.test.mjs` — 15/15 passed, no regressions.
-- [ ] **5. Make context management adaptive**
+- [x] **5. Make context management adaptive**
+  - [x] Added `packAdaptive()` (`studio/memory.mjs`): automatically tries Eco first, then Balanced, then Deep, and stops at the smallest profile whose budget fully holds the current message, recalled constraints, and every pinned note (no silent omissions) — instead of requiring the user to hand-pick a profile before every message.
+  - [x] `studio/server.mjs` `/api/chat` now defaults to `profile:'auto'`; an explicit `eco`/`balanced`/`deep` request still bypasses adaptive selection and uses exactly that profile (unchanged behavior for existing callers/tests).
+  - [x] Session persists which mode was requested (`'auto'` vs. an explicit profile) so the composer's memory-profile selector restores correctly; the concrete profile actually used for a turn is reported separately in `stats.profile` plus `stats.adaptive`/`stats.adaptiveReason`.
+  - [x] UI: memory profile selector defaults to "Auto · fits the smallest profile that works"; the Memory panel now shows which profile was chosen and, when adaptive, why (e.g. "fits within Eco limits").
+  - [x] The full transcript is still retained on disk regardless of the chosen profile — adaptivity only changes how much of it is itemized/recalled into a given request, per step 4's recall layer.
+  - [x] Tests added: `packAdaptive` picks Eco for a short conversation, escalates to a larger profile when a large pinned note would otherwise be dropped, and an explicit profile still bypasses adaptive selection (`studio/tests/core.test.mjs`). End-to-end `/api/chat` with `profile:'auto'` verified via the fixture-backed integration test (`studio/tests/api.test.mjs`).
+  - **Result:** Full suite `node --test studio/tests/*.test.mjs` — 18/18 passed, no regressions.
 - [ ] **6. Upgrade the editor**
 - [ ] **7. Add Git integration**
 - [ ] **8. Add assisted coding and testing**
@@ -63,5 +70,6 @@ the remote commit is verified.
 | 2026-09-15 | Step 3 full suite | Passed | `node --test studio/tests/*.test.mjs` — 12/12 passed (no regressions after server.mjs refactor) |
 | 2026-09-15 | Step 3 manual verification | Complete | Live server: opened a second project, confirmed session/file isolation, switched back, confirmed restoration |
 | 2026-09-15 | Step 4 recall tests | Passed | `node --test studio/tests/*.test.mjs` — 15/15 passed (paraphrase recall, supersession, source references) |
+| 2026-09-15 | Step 5 adaptive context tests | Passed | `node --test studio/tests/*.test.mjs` — 18/18 passed (adaptive profile escalation + end-to-end `/api/chat` with `profile:'auto'`) |
 
 Update this file whenever a roadmap item is attempted, completed, or blocked.

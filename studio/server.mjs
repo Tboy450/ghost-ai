@@ -4,7 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { listFiles, readFile, saveFile, modelStream, BASE_PROMPT } from './core.mjs';
-import { packContext, PROFILES } from './memory.mjs';
+import { packContext, packAdaptive, PROFILES } from './memory.mjs';
 import { openProject, listProjects, activeProject, switchProject, closeProject, ensureProjectDirs } from './projects.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -85,12 +85,12 @@ async function chat(req,res,input) {
   stream.send({type:'session',session});
   let content='',metrics={};
   try {
-    const profile=PROFILES[input.profile]?input.profile:'balanced';
+    const profile=PROFILES[input.profile]?input.profile:'auto';
     const system=BASE_PROMPT+(input.framework?'\n\nReasoning framework:\n'+frameworkPrompt():'');
-    const packed=packContext(session.messages,system,context,profile,session.pinned || []);
-    session.lastContext=packed.stats;session.profile=profile;saveSession(session);
+    const packed = profile==='auto' ? packAdaptive(session.messages,system,context,session.pinned || []) : packContext(session.messages,system,context,profile,session.pinned || []);
+    session.lastContext=packed.stats;session.profile=input.profile==='auto'?'auto':packed.stats.profile;saveSession(session);
     stream.send({type:'context',stats:packed.stats});
-    for await (const event of modelStream(OLLAMA,input.model,packed.messages,stream.controller.signal,PROFILES[profile])) {
+    for await (const event of modelStream(OLLAMA,input.model,packed.messages,stream.controller.signal,PROFILES[packed.stats.profile])) {
       if (event.type==='token') content+=event.text;
       if (event.type==='metrics') metrics=event;
       stream.send(event);

@@ -152,3 +152,23 @@ export function packContext(history, system, context, profileName='balanced', pi
   if (estimated>inputBudget) throw new Error('Pinned context exceeds this memory profile. Remove a note or choose a larger profile.');
   return {messages,stats:{profile:profileName,contextLimit:profile.context,inputBudget,estimatedInputTokens:estimated,outputReserve:profile.output,totalMessages:clean.length,recentMessages:recent.length,archivedMessages:clean.length-recent.length,recalledItems:selected.map(({id,turn,time,kind,text})=>({id,turn,time,kind,text})),pinnedCount:fixed.length-(file?.text?1:0),omittedPinCount:omittedPins.length,fileLines:file?.lines || [],fileTotalLines:file?.totalLines || 0,mode:'extractive; full transcript retained'}};
 }
+
+// Adaptive selection: try the cheapest, fastest profile first and only escalate to a larger
+// context window when the conversation genuinely needs it (a pinned note, recalled constraint,
+// or file excerpt would otherwise be dropped). This automates the eco/balanced/deep choice
+// within the resource limits measured for this hardware in step 2, instead of requiring the
+// user to pick a profile before every message.
+const PROFILE_ORDER = ['eco','balanced','deep'];
+export function packAdaptive(history, system, context, pinned=[]) {
+  let lastError=null;
+  for (const profileName of PROFILE_ORDER) {
+    try {
+      const packed=packContext(history,system,context,profileName,pinned);
+      const fits = packed.stats.omittedPinCount===0
+        && (!context?.content || packed.stats.fileLines.length>0 || packed.stats.fileTotalLines===0)
+        && packed.stats.estimatedInputTokens <= packed.stats.inputBudget*0.94;
+      if (fits || profileName===PROFILE_ORDER.at(-1)) return {...packed,stats:{...packed.stats,adaptive:true,adaptiveReason:fits?`fits within ${PROFILES[profileName].label} limits`:'largest available profile still tight; used anyway'}};
+    } catch (error) { lastError=error; }
+  }
+  throw lastError || new Error('No memory profile could fit this conversation.');
+}

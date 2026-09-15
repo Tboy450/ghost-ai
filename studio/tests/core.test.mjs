@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { readFile, saveFile, safeFile, listFiles, modelStream } from '../core.mjs';
-import { packContext, itemize, estimateTokens, relevantFile, PROFILES } from '../memory.mjs';
+import { packContext, packAdaptive, itemize, estimateTokens, relevantFile, PROFILES } from '../memory.mjs';
 
 test('file saves create an exact backup and reject stale writes',()=>{
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'ghost-files-'));
@@ -80,6 +80,27 @@ test('a later instruction supersedes an earlier conflicting one on the same topi
   const packed=packContext(history,'You are Ghost.',null,'eco');
   assert.ok(packed.messages[0].content.includes('PostgreSQL'));
   assert.ok(!packed.messages[0].content.includes('Always use SQLite'));
+});
+
+test('adaptive selection uses the cheapest profile that fits a short conversation',()=>{
+  const packed=packAdaptive([{role:'user',content:'Say hello in one short sentence.'}],'You are Ghost.',null,[]);
+  assert.equal(packed.stats.profile,'eco');
+  assert.equal(packed.stats.adaptive,true);
+  assert.match(packed.stats.adaptiveReason,/fits within/);
+});
+
+test('adaptive selection escalates to a larger profile when pinned notes would not otherwise fit',()=>{
+  const bigNote='Critical requirement: '+'keep every detail of this long pinned specification in view. '.repeat(160);
+  const packed=packAdaptive([{role:'user',content:'What are the current requirements?'}],'You are Ghost.',null,[bigNote]);
+  assert.notEqual(packed.stats.profile,'eco');
+  assert.equal(packed.stats.omittedPinCount,0);
+  assert.ok(packed.messages[0].content.includes('keep every detail'));
+});
+
+test('explicit profile selection bypasses adaptive escalation',()=>{
+  const result=packContext([{role:'user',content:'Say hello.'}],'You are Ghost.',null,'deep');
+  assert.equal(result.stats.profile,'deep');
+  assert.equal(result.stats.adaptive,undefined);
 });
 
 test('recalled context records carry a source turn and timestamp reference',()=>{

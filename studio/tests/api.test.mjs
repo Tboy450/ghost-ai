@@ -55,6 +55,12 @@ test('API streams and persists chat, protects writes, and saves both comparison 
     const runs=await fetch(origin+'/api/runs').then(r=>r.json());
     assert.equal(runs[0].review,'pending');
     assert.equal(runs[0].results.length,2);
+    const autoResult=await request('/api/chat',{sessionId:session.id,model:'test-local',prompt:'Follow up question.',framework:true,profile:'auto'}).then(r=>r.text());
+    const autoEvents=autoResult.trim().split('\n').map(JSON.parse);
+    const autoContext=autoEvents.find(e=>e.type==='context');
+    assert.equal(autoContext.stats.adaptive,true);
+    assert.ok(['eco','balanced','deep'].includes(autoContext.stats.profile));
+    assert.equal(autoEvents.at(-1).type,'done');
     const otherDir=fs.mkdtempSync(path.join(os.tmpdir(),'ghost-project-b-'));
     const opened=await request('/api/projects',{path:otherDir,name:'Project B'}).then(r=>r.json());
     assert.equal(opened.name,'Project B');
