@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { readFile, saveFile, safeFile, listFiles } from '../core.mjs';
-import { packContext, itemize, estimateTokens, relevantFile, PROFILES } from '../memory.mjs';
+import { readFile, saveFile, safeFile, listFiles, searchProject, modelStream } from '../core.mjs';
+import { packContext, packAdaptive, itemize, estimateTokens, relevantFile, PROFILES } from '../memory.mjs';
 
 test('file saves create an exact backup and reject stale writes',()=>{
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'ghost-files-'));
@@ -19,6 +19,23 @@ test('file saves create an exact backup and reject stale writes',()=>{
     for(const name of ['../note.md','/note.md','C:/note.md','note.md:secret','x\\note.md','.git/config','file.exe']) assert.throws(()=>safeFile(dir,name));
     assert.deepEqual(listFiles(dir),['note.md']);
   }finally{const resolved=fs.realpathSync(dir);assert.ok(resolved.startsWith(fs.realpathSync(os.tmpdir())+path.sep+'ghost-files-'));fs.rmSync(resolved,{recursive:true,force:true});}
+});
+
+test('project search finds matching lines across files, case-insensitively', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ghost-search-'));
+  try {
+    fs.writeFileSync(path.join(dir, 'a.md'), 'first line\nUses SQLite here\nlast line');
+    fs.mkdirSync(path.join(dir, 'sub'));
+    fs.writeFileSync(path.join(dir, 'sub', 'b.py'), 'def sqlite_setup():\n    pass');
+    const results = searchProject(dir, 'sqlite');
+    assert.equal(results.length, 2);
+    assert.ok(results.some(r => r.path === 'a.md' && r.line === 2));
+    assert.ok(results.some(r => r.path === 'sub/b.py' && r.line === 1));
+    assert.deepEqual(searchProject(dir, ''), []);
+    assert.deepEqual(searchProject(dir, 'nomatch'), []);
+  } finally {
+    fs.rmSync(fs.realpathSync(dir), {recursive: true, force: true});
+  }
 });
 
 test('long histories recall an old relevant constraint and stay within the budget',()=>{
@@ -58,5 +75,98 @@ test('each profile reserves output and keeps the latest request unchanged',()=>{
     assert.equal(result.messages.at(-1).content,'New instruction wins.');
     assert.ok(!JSON.stringify(result.messages).includes('failed answer'));
     assert.ok(result.stats.estimatedInputTokens+result.stats.outputReserve<result.stats.contextLimit);
+  }
+});
+
+test('recall matches paraphrased wording, not just exact keywords',()=>{
+  const filler='Discuss the orchard and apples. '.repeat(45);
+  const history=[{role:'user',content:'The database for the lighthouse project must be PostgreSQL.'}];
+  for(let i=0;i<120;i++)history.push({role:i%2?'user':'assistant',content:`Unrelated progress ${i}. `+filler});
+  history.push({role:'user',content:'Reminder: which db should the lighthouse service use?'});
+  const packed=packContext(history,'You are Ghost.',null,'eco');
+  assert.ok(packed.messages[0].content.includes('PostgreSQL'));
+});
+
+test('a later instruction supersedes an earlier conflicting one on the same topic',()=>{
+  const filler='Discuss the orchard and apples. '.repeat(45);
+  const history=[{role:'user',content:'Always use SQLite for the lighthouse project database.'}];
+  for(let i=0;i<40;i++)history.push({role:i%2?'user':'assistant',content:`Unrelated progress ${i}. `+filler});
+  history.push({role:'user',content:'Actually, switch the lighthouse project database to PostgreSQL instead.'});
+  for(let i=0;i<40;i++)history.push({role:i%2?'user':'assistant',content:`More progress ${i}. `+filler});
+  history.push({role:'user',content:'Which database does the lighthouse project use?'});
+  const packed=packContext(history,'You are Ghost.',null,'eco');
+  assert.ok(packed.messages[0].content.includes('PostgreSQL'));
+  assert.ok(!packed.messages[0].content.includes('Always use SQLite'));
+});
+
+test('adaptive selection uses the cheapest profile that fits a short conversation',()=>{
+  const packed=packAdaptive([{role:'user',content:'Say hello in one short sentence.'}],'You are Ghost.',null,[]);
+  assert.equal(packed.stats.profile,'eco');
+  assert.equal(packed.stats.adaptive,true);
+  assert.match(packed.stats.adaptiveReason,/fits within/);
+});
+
+test('adaptive selection escalates to a larger profile when pinned notes would not otherwise fit',()=>{
+  const bigNote='Critical requirement: '+'keep every detail of this long pinned specification in view. '.repeat(160);
+  const packed=packAdaptive([{role:'user',content:'What are the current requirements?'}],'You are Ghost.',null,[bigNote]);
+  assert.notEqual(packed.stats.profile,'eco');
+  assert.equal(packed.stats.omittedPinCount,0);
+  assert.ok(packed.messages[0].content.includes('keep every detail'));
+});
+
+test('explicit profile selection bypasses adaptive escalation',()=>{
+  const result=packContext([{role:'user',content:'Say hello.'}],'You are Ghost.',null,'deep');
+  assert.equal(result.stats.profile,'deep');
+  assert.equal(result.stats.adaptive,undefined);
+});
+
+test('recalled context records carry a source turn and timestamp reference',()=>{
+  const filler='Discuss the orchard and apples. '.repeat(45);
+  const history=[{role:'user',content:'Always use UTC timestamps for the lighthouse project.',time:'2026-01-01T00:00:00.000Z'}];
+  for(let i=0;i<120;i++)history.push({role:i%2?'user':'assistant',content:`Unrelated progress ${i}. `+filler});
+  history.push({role:'user',content:'What timezone did we agree on for the lighthouse project?'});
+  const packed=packContext(history,'You are Ghost.',null,'eco');
+  assert.ok(packed.messages[0].content.includes('at 2026-01-01T00:00:00.000Z'));
+  const recalled=packed.stats.recalledItems.find(item=>item.text.includes('UTC'));
+  assert.equal(recalled.time,'2026-01-01T00:00:00.000Z');
+  assert.equal(recalled.turn,0);
+});
+
+test('model streaming exposes tokens and terminal metrics',async()=>{
+  const server = await import('node:http').then(({default:http}) => new Promise(resolve => {
+    const fixture = http.createServer((req,res)=>{
+      res.setHeader('Content-Type','application/x-ndjson');
+      res.write(JSON.stringify({message:{content:'Hello '}})+'\n');
+      res.end(JSON.stringify({message:{content:'Ghost.'},done:true,eval_count:2,prompt_eval_count:7,total_duration:2e9,eval_duration:1e9})+'\n');
+    });
+    fixture.listen(0,'127.0.0.1',()=>resolve(fixture));
+  }));
+  try {
+    const events = [];
+    for await (const event of modelStream(`http://127.0.0.1:${server.address().port}`,'fixture',[],new AbortController().signal)) events.push(event);
+    assert.deepEqual(events.map(event=>event.type),['token','token','metrics']);
+    assert.equal(events.filter(event=>event.type==='token').map(event=>event.text).join(''),'Hello Ghost.');
+    assert.deepEqual(events.at(-1),{type:'metrics',tokens:2,promptTokens:7,seconds:2,generationSeconds:1,finishReason:'stop'});
+  } finally {
+    await new Promise(resolve=>server.close(resolve));
+  }
+});
+
+test('model streaming stops when its signal is aborted',async()=>{
+  const http = await import('node:http').then(module=>module.default);
+  const server = http.createServer((req,res)=>{
+    res.setHeader('Content-Type','application/x-ndjson');
+    res.write(JSON.stringify({message:{content:'first'}})+'\n');
+    setTimeout(()=>res.end(JSON.stringify({message:{content:'late'},done:true})+'\n'),1000);
+  });
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  const controller = new AbortController();
+  try {
+    const stream = modelStream(`http://127.0.0.1:${server.address().port}`,'fixture',[],controller.signal);
+    assert.equal((await stream.next()).value.text,'first');
+    controller.abort();
+    await assert.rejects(async()=>{ for await (const _event of stream) {} },error=>error.name==='AbortError');
+  } finally {
+    await new Promise(resolve=>server.close(resolve));
   }
 });

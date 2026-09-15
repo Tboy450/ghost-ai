@@ -3,37 +3,54 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomBytes, randomUUID } from 'node:crypto';
-import { listFiles, readFile, saveFile, modelStream, BASE_PROMPT } from './core.mjs';
-import { packContext, PROFILES } from './memory.mjs';
+import { listFiles, readFile, saveFile, searchProject, modelStream, BASE_PROMPT } from './core.mjs';
+import { packContext, packAdaptive, PROFILES } from './memory.mjs';
+import { openProject, listProjects, activeProject, switchProject, closeProject, ensureProjectDirs } from './projects.mjs';
+import * as git from './git.mjs';
+import { listProviders, getFocus, setFocus, runCycle, listHistory, PROVIDERS } from './selfimprove.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.dirname(HERE);
-const DATA = process.env.STUDIO_DATA_DIR || path.join(ROOT,'.ghost');
+// Global config: only the project registry lives here. Each project's
+// conversations, memory, runs, and backups live inside that project's own
+// folder at `<project>/.ghost/`, so opening a folder elsewhere keeps its data with it.
+const CONFIG_DIR = process.env.STUDIO_DATA_DIR || path.join(ROOT,'.ghost');
+const REGISTRY_PATH = path.join(CONFIG_DIR,'projects.json');
 const PORT = Number(process.env.STUDIO_PORT || 4317);
 const ORIGIN = `http://127.0.0.1:${PORT}`;
 const OLLAMA = process.env.STUDIO_OLLAMA_URL || 'http://127.0.0.1:11435';
 if (!['127.0.0.1','localhost','[::1]'].includes(new URL(OLLAMA).hostname)) throw new Error('The model endpoint must be local.');
 const TOKEN = randomBytes(32).toString('hex');
-for (const dir of [DATA,path.join(DATA,'sessions'),path.join(DATA,'runs'),path.join(DATA,'backups'),path.join(DATA,'workspace')]) fs.mkdirSync(dir,{recursive:true});
+fs.mkdirSync(CONFIG_DIR,{recursive:true});
 const ROOTS = {
   source:{label:'Ghost · application',path:HERE},
   framework:{label:'Semantic Integrity',path:path.join(ROOT,'ai-bias-and-creation')},
-  workspace:{label:'My workspace',path:path.join(DATA,'workspace')},
 };
 if (fs.existsSync(path.join(ROOT,'claude-code-2.1.88/src'))) ROOTS.archive={label:'Claude Code · local archive',path:path.join(ROOT,'claude-code-2.1.88/src')};
-const welcomeFile = path.join(ROOTS.workspace.path,'Getting started.md');
-if (!fs.existsSync(welcomeFile)) fs.writeFileSync(welcomeFile, '# Welcome to Ghost\n\nA local space to think, build, and test.\n\n- Start a conversation in the center.\n- Browse the recovered source or your framework on the right.\n- Attach a file to ask the assistant about it.\n- Use Compare to run the same prompt with and without the framework.\n\nThe assistant suggests edits; Save writes the editor contents and creates a backup.\n');
-const activityPath = path.join(DATA,'activity.jsonl');
+
+let project = activeProject(REGISTRY_PATH);
+let dirs = null;
+function applyProject(nextProject) {
+  project = nextProject;
+  dirs = ensureProjectDirs(project);
+  ROOTS.workspace = {label:project.name,path:project.path};
+  const entries = fs.readdirSync(project.path).filter(n=>!n.startsWith('.'));
+  const welcomeFile = path.join(project.path,'Getting started.md');
+  if (!entries.length && !fs.existsSync(welcomeFile)) fs.writeFileSync(welcomeFile, '# Welcome to Ghost\n\nA local space to think, build, and test.\n\n- Start a conversation in the center.\n- Browse the recovered source or your framework on the right.\n- Attach a file to ask the assistant about it.\n- Use Compare to run the same prompt with and without the framework.\n\nThe assistant suggests edits; Save writes the editor contents and creates a backup.\n');
+}
+applyProject(project || openProject(REGISTRY_PATH, path.join(CONFIG_DIR,'workspace'), 'My workspace'));
 const active = new Set();
+let selfImproveBusy = false;
+const PROVIDERS_SET = new Set(Object.keys(PROVIDERS));
 const idValid = id => typeof id === 'string' && /^[a-z0-9-]{1,80}$/i.test(id);
-function eventLog(type, detail) { fs.appendFileSync(activityPath,JSON.stringify({time:new Date().toISOString(),type,detail})+'\n'); }
+function eventLog(type, detail) { fs.appendFileSync(path.join(dirs.ghost,'activity.jsonl'),JSON.stringify({time:new Date().toISOString(),type,detail})+'\n'); }
 function json(res,status,value) { res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'}); res.end(JSON.stringify(value)); }
 function fail(message,status=400) { return Object.assign(new Error(message),{status}); }
-function rootFor(key) { if (!ROOTS[key]) throw fail('Unknown project.'); return ROOTS[key].path; }
-function sessionFile(id) { if (!idValid(id)) throw fail('Invalid conversation.'); return path.join(DATA,'sessions',id+'.json'); }
+function rootFor(key) { if (!ROOTS[key]) throw fail('Unknown project root.'); return ROOTS[key].path; }
+function sessionFile(id) { if (!idValid(id)) throw fail('Invalid conversation.'); return path.join(dirs.sessions,id+'.json'); }
 function loadSession(id) { return JSON.parse(fs.readFileSync(sessionFile(id),'utf8')); }
 function saveSession(session) { session.updatedAt = new Date().toISOString(); fs.writeFileSync(sessionFile(session.id),JSON.stringify(session,null,2)); }
-function sessionList() { return fs.readdirSync(path.join(DATA,'sessions')).filter(n=>n.endsWith('.json')).map(n=>JSON.parse(fs.readFileSync(path.join(DATA,'sessions',n),'utf8'))).sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt)); }
+function sessionList() { return fs.readdirSync(dirs.sessions).filter(n=>n.endsWith('.json')).map(n=>JSON.parse(fs.readFileSync(path.join(dirs.sessions,n),'utf8'))).sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt)); }
 function frameworkPrompt() { return fs.readFileSync(path.join(ROOTS.framework.path,'prompts/priority_loader_prompt.md'),'utf8'); }
 async function body(req) {
   let data=''; for await (const chunk of req) { data+=chunk; if (Buffer.byteLength(data)>1500000) throw fail('Request too large.',413); }
@@ -72,12 +89,12 @@ async function chat(req,res,input) {
   stream.send({type:'session',session});
   let content='',metrics={};
   try {
-    const profile=PROFILES[input.profile]?input.profile:'balanced';
+    const profile=PROFILES[input.profile]?input.profile:'auto';
     const system=BASE_PROMPT+(input.framework?'\n\nReasoning framework:\n'+frameworkPrompt():'');
-    const packed=packContext(session.messages,system,context,profile,session.pinned || []);
-    session.lastContext=packed.stats;session.profile=profile;saveSession(session);
+    const packed = profile==='auto' ? packAdaptive(session.messages,system,context,session.pinned || []) : packContext(session.messages,system,context,profile,session.pinned || []);
+    session.lastContext=packed.stats;session.profile=input.profile==='auto'?'auto':packed.stats.profile;saveSession(session);
     stream.send({type:'context',stats:packed.stats});
-    for await (const event of modelStream(OLLAMA,input.model,packed.messages,stream.controller.signal,PROFILES[profile])) {
+    for await (const event of modelStream(OLLAMA,input.model,packed.messages,stream.controller.signal,PROFILES[packed.stats.profile])) {
       if (event.type==='token') content+=event.text;
       if (event.type==='metrics') metrics=event;
       stream.send(event);
@@ -106,7 +123,7 @@ async function compare(req,res,input) {
   if (active.size) throw fail('The local model is already working. Finish or stop the current task first.',409);
   active.add('comparison');
   const run={id:randomUUID(),time:new Date().toISOString(),caseId:input.caseId,model:input.model,modelDigest:model.digest,status:'running',results:[],review:'pending',settings:{temperature:0.35,num_ctx:8192,num_predict:1600}};
-  const save=()=>fs.writeFileSync(path.join(DATA,'runs',run.id+'.json'),JSON.stringify(run,null,2));
+  const save=()=>fs.writeFileSync(path.join(dirs.runs,run.id+'.json'),JSON.stringify(run,null,2));
   save(); const stream=streamStart(req,res); stream.send({type:'run',run});
   try {
     for (const request of requests) {
@@ -142,12 +159,30 @@ const server=http.createServer(async(req,res)=>{
     const url=new URL(req.url,ORIGIN);
     if (req.method!=='GET' && (req.headers['x-studio-token']!==TOKEN || (req.headers.origin && ![ORIGIN,`http://localhost:${PORT}`].includes(req.headers.origin)))) throw fail('Refresh the studio to continue.',403);
     if (req.method==='GET' && url.pathname==='/api/bootstrap') {
-      return json(res,200,{token:TOKEN,name:'Ghost',version:'0.1.0',roots:Object.entries(ROOTS).map(([id,r])=>({id,label:r.label})),sessions:sessionList(),profiles:PROFILES,model:await modelStatus()});
+      return json(res,200,{token:TOKEN,name:'Ghost',version:'0.1.0',roots:Object.entries(ROOTS).map(([id,r])=>({id,label:r.label})),sessions:sessionList(),profiles:PROFILES,model:await modelStatus(),projects:listProjects(REGISTRY_PATH),activeProject:{id:project.id,name:project.name,path:project.path}});
     }
     if (req.method==='GET' && url.pathname==='/api/status') return json(res,200,await modelStatus());
+    if (req.method==='GET' && url.pathname==='/api/projects') return json(res,200,{projects:listProjects(REGISTRY_PATH),activeId:project.id});
+    if (req.method==='POST' && url.pathname==='/api/projects') {
+      if (active.size) throw fail('Wait for the current response before switching projects.',409);
+      const input=await body(req); applyProject(openProject(REGISTRY_PATH,input.path,input.name));
+      eventLog('project_opened',project.name); return json(res,201,{id:project.id,name:project.name,path:project.path});
+    }
+    if (req.method==='PUT' && url.pathname==='/api/projects/active') {
+      if (active.size) throw fail('Wait for the current response before switching projects.',409);
+      const input=await body(req); applyProject(switchProject(REGISTRY_PATH,input.id));
+      eventLog('project_switched',project.name); return json(res,200,{id:project.id,name:project.name,path:project.path});
+    }
+    if (req.method==='DELETE' && url.pathname==='/api/projects') {
+      if (active.size) throw fail('Wait for the current response before closing a project.',409);
+      const id=url.searchParams.get('id'); const wasActive=id===project.id; const fallback=closeProject(REGISTRY_PATH,id);
+      if (wasActive) applyProject(fallback);
+      return json(res,200,{id:project.id,name:project.name,path:project.path,projects:listProjects(REGISTRY_PATH)});
+    }
     if (req.method==='GET' && url.pathname==='/api/files') return json(res,200,{files:listFiles(rootFor(url.searchParams.get('root')))});
+    if (req.method==='GET' && url.pathname==='/api/search') return json(res,200,{results:searchProject(rootFor(url.searchParams.get('root')),url.searchParams.get('q'))});
     if (req.method==='GET' && url.pathname==='/api/file') return json(res,200,readFile(rootFor(url.searchParams.get('root')),url.searchParams.get('path')));
-    if (req.method==='PUT' && url.pathname==='/api/file') { const input=await body(req); const result=saveFile(rootFor(input.root),input.path,input.content,input.hash,path.join(DATA,'backups'));eventLog('file_saved',`${input.root}/${input.path}`);return json(res,200,result); }
+    if (req.method==='PUT' && url.pathname==='/api/file') { const input=await body(req); const result=saveFile(rootFor(input.root),input.path,input.content,input.hash,dirs.backups);eventLog('file_saved',`${input.root}/${input.path}`);return json(res,200,result); }
     if (req.method==='POST' && url.pathname==='/api/file') {
       const input=await body(req);
       if (typeof input.name!=='string' || !/^[a-zA-Z0-9 _-]{1,80}\.(md|txt|py|js|html|css|json|ts)$/.test(input.name)) throw fail('Use a simple filename such as notes.md or app.py.');
@@ -164,9 +199,30 @@ const server=http.createServer(async(req,res)=>{
     if (req.method==='POST' && url.pathname==='/api/chat') return await chat(req,res,await body(req));
     if (req.method==='GET' && url.pathname==='/api/cases') return json(res,200,comparisonCases().filter(r=>r.variant==='baseline').map(r=>({id:r.case_id,prompt:r.user_prompt.split('Request:\n')[1]})));
     if (req.method==='POST' && url.pathname==='/api/compare') return await compare(req,res,await body(req));
-    if (req.method==='GET' && url.pathname==='/api/runs') return json(res,200,fs.readdirSync(path.join(DATA,'runs')).filter(n=>n.endsWith('.json')).map(n=>JSON.parse(fs.readFileSync(path.join(DATA,'runs',n),'utf8'))).sort((a,b)=>b.time.localeCompare(a.time)));
-    if (req.method==='GET' && url.pathname==='/api/activity') return json(res,200,fs.existsSync(activityPath)?fs.readFileSync(activityPath,'utf8').trim().split('\n').filter(Boolean).map(JSON.parse).reverse().slice(0,100):[]);
-    const assets={'/':'index.html','/app.js':'app.js','/styles.css':'styles.css','/ghost.css':'ghost.css'};
+    if (req.method==='GET' && url.pathname==='/api/runs') return json(res,200,fs.readdirSync(dirs.runs).filter(n=>n.endsWith('.json')).map(n=>JSON.parse(fs.readFileSync(path.join(dirs.runs,n),'utf8'))).sort((a,b)=>b.time.localeCompare(a.time)));
+    if (req.method==='GET' && url.pathname==='/api/activity') { const activityPath=path.join(dirs.ghost,'activity.jsonl'); return json(res,200,fs.existsSync(activityPath)?fs.readFileSync(activityPath,'utf8').trim().split('\n').filter(Boolean).map(JSON.parse).reverse().slice(0,100):[]); }
+    if (req.method==='GET' && url.pathname==='/api/git/status') return json(res,200,git.status(rootFor(url.searchParams.get('root')||'workspace')));
+    if (req.method==='GET' && url.pathname==='/api/git/diff') return json(res,200,{diff:git.diff(rootFor(url.searchParams.get('root')||'workspace'),url.searchParams.get('path')||undefined)});
+    if (req.method==='GET' && url.pathname==='/api/git/log') return json(res,200,{commits:git.log(rootFor(url.searchParams.get('root')||'workspace'),Number(url.searchParams.get('limit'))||25)});
+    if (req.method==='POST' && url.pathname==='/api/git/commit') { const input=await body(req); const result=git.commit(rootFor(input.root||'workspace'),input.message); eventLog('git_commit',`${input.root||'workspace'} · ${result.hash.slice(0,7)}`); return json(res,201,result); }
+    if (req.method==='POST' && url.pathname==='/api/git/push') { const input=await body(req); const result=git.push(rootFor(input.root||'workspace'),{remote:input.remote,branch:input.branch}); eventLog('git_push',`${input.root||'workspace'} · ${result.branch}`); return json(res,200,result); }
+    if (req.method==='POST' && url.pathname==='/api/git/restore') { const input=await body(req); const content=git.fileAt(rootFor(input.root||'workspace'),input.hash,input.path); return json(res,200,{path:input.path,content}); }
+    if (req.method==='GET' && url.pathname==='/api/self-improve/providers') return json(res,200,{providers:listProviders()});
+    if (req.method==='GET' && url.pathname==='/api/self-improve/focus') return json(res,200,getFocus(dirs));
+    if (req.method==='PUT' && url.pathname==='/api/self-improve/focus') { const input=await body(req); return json(res,200,setFocus(dirs,input.focus,input.queue)); }
+    if (req.method==='GET' && url.pathname==='/api/self-improve/history') return json(res,200,{cycles:listHistory(dirs)});
+    if (req.method==='POST' && url.pathname==='/api/self-improve/run') {
+      if (selfImproveBusy) throw fail('A self-improvement cycle is already running.',409);
+      const input=await body(req);
+      if (!PROVIDERS_SET.has(input.provider)) throw fail('Choose a supported AI provider.');
+      selfImproveBusy=true;
+      try {
+        const report=await runCycle({codeRoot:ROOT,dirs,providerId:input.provider,apiKey:input.apiKey,model:input.model,autoPush:input.autoPush!==false,focusOverride:input.focus});
+        eventLog('self_improve_cycle',`${input.provider} · ${report.committed?'committed':'no change'}${report.pushed?' · pushed':''}`);
+        return json(res,report.error && !report.committed?200:201,report);
+      } finally { selfImproveBusy=false; }
+    }
+    const assets={'/':'index.html','/app.js':'app.js','/diff.js':'diff.js','/highlight.js':'highlight.js','/styles.css':'styles.css','/ghost.css':'ghost.css'};
     if (req.method==='GET' && assets[url.pathname]) {
       const file=assets[url.pathname];res.writeHead(200,{'Content-Type':file.endsWith('.js')?'text/javascript':file.endsWith('.css')?'text/css':'text/html'});return res.end(fs.readFileSync(path.join(HERE,'public',file)));
     }

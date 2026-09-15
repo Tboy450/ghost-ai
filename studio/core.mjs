@@ -25,6 +25,24 @@ export function listFiles(root, dir = root) {
   }
   return result.sort();
 }
+export function searchProject(root, query, limit = 200) {
+  const term = (query ?? '').trim();
+  if (!term) return [];
+  const needle = term.toLowerCase();
+  const results = [];
+  for (const relative of listFiles(root)) {
+    if (results.length >= limit) break;
+    let content;
+    try { content = fs.readFileSync(path.join(root, relative), 'utf8'); } catch { continue; }
+    const lines = content.split('\n');
+    for (let i = 0; i < lines.length && results.length < limit; i++) {
+      const index = lines[i].toLowerCase().indexOf(needle);
+      if (index < 0) continue;
+      results.push({path: relative, line: i + 1, text: lines[i].trim().slice(0, 200)});
+    }
+  }
+  return results;
+}
 export function readFile(root, relative) {
   const full = safeFile(root, relative);
   if (fs.statSync(full).size > 1200000) throw Object.assign(new Error('File is too large for the editor.'), {status: 413});
