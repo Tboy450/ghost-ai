@@ -46,6 +46,10 @@ The Memory panel shows what was recalled. This is fast extractive retrieval, not
 
 You can open these files in Ghost's project panel or in your usual editor. Backend edits take effect after restarting the server. Reload the browser after frontend edits.
 
+### Improvement roadmap
+
+Follow the [ordered improvement roadmap](docs/ROADMAP.md), including its correction to the progress report. After each completed implementation step, run the relevant checks, commit, push, verify the remote commit, and report the GitHub link and local source path before starting the next step. [Copilot instructions](.github/copilot-instructions.md) record this workflow for repository work.
+
 ## Verification
 
 ```powershell
