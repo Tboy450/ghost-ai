@@ -34,7 +34,14 @@ the remote commit is verified.
   - [x] Integration test extended in `studio/tests/api.test.mjs`: opening a second project isolates sessions/files (workspace file from project A returns 404 while project B is active), switching back restores project A's session/file, and closing a project falls back correctly.
   - [x] Manual smoke test: started the real server, opened a new project folder via the API, confirmed `bootstrap.activeProject` switched and session count reset to 0, listed both projects, switched back, confirmed original project restored.
   - [x] Full suite re-run after refactor: `node --test studio/tests/*.test.mjs` — 12/12 passed (no regressions to the pre-existing default-workspace bootstrap path).
-- [ ] **4. Improve memory recall**
+- [x] **4. Improve memory recall**
+  - [x] Added light stemming (`studio/memory.mjs`) so plurals/verb forms ("databases"/"configuring") still match their root term, not just exact keywords.
+  - [x] Added a small curated synonym table (database/db, deadline/due, timezone/tz, configuration/config/setting, requirement/spec, delete/remove/erase, password/credential/secret, error/bug/issue/defect) so common paraphrases recall the right memory.
+  - [x] Recalled context records now carry a source reference: each item keeps its originating turn number and, when available, the message's original timestamp, and the packed prompt shows `[turn-id; kind; previous user text at <timestamp>]`.
+  - [x] Added supersession detection: when a later constraint clearly restates the same topic as an earlier one (overlap-coefficient ≥ 0.55 on stemmed/synonym-expanded terms), the stale earlier constraint is dropped from recall so only the current instruction surfaces.
+  - [x] Broadened constraint detection to catch revision phrasing ("instead", "switch", "actually", "from now on", "change to", "update") in addition to the original "must/never/always/..." set.
+  - [x] Memory panel UI (`app.js`) now shows the source timestamp alongside each recalled card's turn id and kind.
+  - [x] Tests added to `studio/tests/core.test.mjs`: paraphrased-keyword recall, later-instruction supersession, and source-reference (turn + timestamp) presence. Full suite: `node --test studio/tests/*.test.mjs` — 15/15 passed, no regressions.
 - [ ] **5. Make context management adaptive**
 - [ ] **6. Upgrade the editor**
 - [ ] **7. Add Git integration**
@@ -55,5 +62,6 @@ the remote commit is verified.
 | 2026-09-15 | Step 3 unit tests | Passed | `node --test studio/tests/projects.test.mjs` — 4/4 passed |
 | 2026-09-15 | Step 3 full suite | Passed | `node --test studio/tests/*.test.mjs` — 12/12 passed (no regressions after server.mjs refactor) |
 | 2026-09-15 | Step 3 manual verification | Complete | Live server: opened a second project, confirmed session/file isolation, switched back, confirmed restoration |
+| 2026-09-15 | Step 4 recall tests | Passed | `node --test studio/tests/*.test.mjs` — 15/15 passed (paraphrase recall, supersession, source references) |
 
 Update this file whenever a roadmap item is attempted, completed, or blocked.

@@ -34,6 +34,8 @@ The default model is Qwen3 4B Instruct. On other systems, run Ollama separately 
 
 Ghost keeps the complete transcript on disk, itemizes older user messages, retrieves relevant records, and selects useful file excerpts. It assembles these with recent turns and pinned requirements into a bounded context. Eco, Balanced, and Deep profiles trade memory use for the amount of context available.
 
+Recall matches by stemmed keywords plus a small synonym table (for example "db" recalls "database", "due" recalls "deadline"), not just exact word overlap. Each recalled record keeps a source reference — its originating turn and, when available, its original timestamp — shown in the Memory panel and in the packed prompt. When a later instruction clearly restates the same topic as an earlier one (for example switching a stated requirement to something else), the newer instruction supersedes the stale one so recall doesn't resurface outdated requirements.
+
 The Memory panel shows what was recalled. This is fast extractive retrieval, not a guarantee of perfect memory. Critical facts can be pinned. See [architecture](docs/GHOST_ARCHITECTURE.md) and [test results](docs/RESULTS.md).
 
 ## Projects

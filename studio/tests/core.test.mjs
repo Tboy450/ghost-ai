@@ -61,6 +61,39 @@ test('each profile reserves output and keeps the latest request unchanged',()=>{
   }
 });
 
+test('recall matches paraphrased wording, not just exact keywords',()=>{
+  const filler='Discuss the orchard and apples. '.repeat(45);
+  const history=[{role:'user',content:'The database for the lighthouse project must be PostgreSQL.'}];
+  for(let i=0;i<120;i++)history.push({role:i%2?'user':'assistant',content:`Unrelated progress ${i}. `+filler});
+  history.push({role:'user',content:'Reminder: which db should the lighthouse service use?'});
+  const packed=packContext(history,'You are Ghost.',null,'eco');
+  assert.ok(packed.messages[0].content.includes('PostgreSQL'));
+});
+
+test('a later instruction supersedes an earlier conflicting one on the same topic',()=>{
+  const filler='Discuss the orchard and apples. '.repeat(45);
+  const history=[{role:'user',content:'Always use SQLite for the lighthouse project database.'}];
+  for(let i=0;i<40;i++)history.push({role:i%2?'user':'assistant',content:`Unrelated progress ${i}. `+filler});
+  history.push({role:'user',content:'Actually, switch the lighthouse project database to PostgreSQL instead.'});
+  for(let i=0;i<40;i++)history.push({role:i%2?'user':'assistant',content:`More progress ${i}. `+filler});
+  history.push({role:'user',content:'Which database does the lighthouse project use?'});
+  const packed=packContext(history,'You are Ghost.',null,'eco');
+  assert.ok(packed.messages[0].content.includes('PostgreSQL'));
+  assert.ok(!packed.messages[0].content.includes('Always use SQLite'));
+});
+
+test('recalled context records carry a source turn and timestamp reference',()=>{
+  const filler='Discuss the orchard and apples. '.repeat(45);
+  const history=[{role:'user',content:'Always use UTC timestamps for the lighthouse project.',time:'2026-01-01T00:00:00.000Z'}];
+  for(let i=0;i<120;i++)history.push({role:i%2?'user':'assistant',content:`Unrelated progress ${i}. `+filler});
+  history.push({role:'user',content:'What timezone did we agree on for the lighthouse project?'});
+  const packed=packContext(history,'You are Ghost.',null,'eco');
+  assert.ok(packed.messages[0].content.includes('at 2026-01-01T00:00:00.000Z'));
+  const recalled=packed.stats.recalledItems.find(item=>item.text.includes('UTC'));
+  assert.equal(recalled.time,'2026-01-01T00:00:00.000Z');
+  assert.equal(recalled.turn,0);
+});
+
 test('model streaming exposes tokens and terminal metrics',async()=>{
   const server = await import('node:http').then(({default:http}) => new Promise(resolve => {
     const fixture = http.createServer((req,res)=>{
