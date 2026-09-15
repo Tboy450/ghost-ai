@@ -54,7 +54,7 @@ node --test studio/tests/*.test.mjs
 node scripts/benchmark_context.mjs
 ```
 
-Run a live local-model validation after the engine and model are installed. It checks model discovery, non-empty answers, streaming latency, terminal token metrics, and measured generation speed:
+Run a live Qwen3 4B Instruct validation after the engine and model are installed. It checks model discovery, non-empty answers, streaming latency, terminal token metrics, and measured generation speed:
 
 ```powershell
 node scripts/validate-local-model.mjs
@@ -62,6 +62,9 @@ node scripts/validate-local-model.mjs --check-cancellation
 node scripts/validate-local-model.mjs --runs=3
 node scripts/validate-local-model.mjs --profiles=eco,balanced,deep --runs=3
 ```
+
+The validator requires `qwen3:4b-instruct` by default. Set `GHOST_MODEL` only when
+deliberately validating another installed model.
 
 `--runs` repeats the same prompt per selected profile (capped at 20). `--profiles` accepts
 any comma-separated combination of `eco`, `balanced`, and `deep`. The report compares

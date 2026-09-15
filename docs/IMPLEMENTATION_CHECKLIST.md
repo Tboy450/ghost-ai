@@ -25,5 +25,7 @@ the remote commit is verified.
 | Date | Area | Result | Evidence |
 |---|---|---|---|
 | 2026-09-15 | Roadmap correction | Recorded | No improvement is marked complete; all ten remain pending |
+| 2026-09-15 | Step 1 contract checks | Passed | `node --test studio/tests/*.test.mjs` — 8/8 passed |
+| 2026-09-15 | Step 1 live Qwen3 check | Blocked | Ollama was unavailable at `127.0.0.1:11435`; restart validation remains pending |
 
 Update this file whenever a roadmap item is attempted, completed, or blocked.

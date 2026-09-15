@@ -3,7 +3,7 @@ import { modelStream } from '../studio/core.mjs';
 import { PROFILES } from '../studio/memory.mjs';
 
 const endpoint = process.env.STUDIO_OLLAMA_URL || 'http://127.0.0.1:11435';
-const requestedModel = process.env.GHOST_MODEL;
+const requestedModel = process.env.GHOST_MODEL || 'qwen3:4b-instruct';
 const prompt = process.env.GHOST_VALIDATION_PROMPT || 'Reply with one short sentence confirming that local inference is working.';
 const cancellationCheck = process.argv.includes('--check-cancellation');
 const runsArgument = process.argv.find(argument => argument.startsWith('--runs='));
@@ -18,8 +18,8 @@ if (!profiles.length) throw new Error('Choose at least one valid profile: eco, b
 const tagsResponse = await fetch(`${endpoint}/api/tags`,{signal:AbortSignal.timeout(5000)});
 if (!tagsResponse.ok) throw new Error(`Model engine returned ${tagsResponse.status}.`);
 const tags = await tagsResponse.json();
-const model = requestedModel || tags.models?.[0]?.name;
-if (!model) throw new Error('No downloaded local model was found. Run scripts/Setup-LocalModel.ps1 first.');
+const model = tags.models?.find(item => item.name === requestedModel)?.name;
+if (!model) throw new Error(`Required model ${requestedModel} was not found. Run scripts/Setup-LocalModel.ps1 -Model ${requestedModel}.`);
 
 async function runProbe(profileName) {
   const profile = PROFILES[profileName];
