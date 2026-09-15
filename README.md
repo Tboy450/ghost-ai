@@ -43,6 +43,7 @@ The Memory panel shows what was recalled. This is fast extractive retrieval, not
 - Frontend behavior: `studio/public/app.js`
 - Layout and styles: `studio/public/`
 - Reasoning framework: `ai-bias-and-creation/prompts/priority_loader_prompt.md`
+- Implementation progress: `docs/IMPLEMENTATION_CHECKLIST.md`
 
 You can open these files in Ghost's project panel or in your usual editor. Backend edits take effect after restarting the server. Reload the browser after frontend edits.
 
@@ -52,6 +53,20 @@ You can open these files in Ghost's project panel or in your usual editor. Backe
 node --test studio/tests/*.test.mjs
 node scripts/benchmark_context.mjs
 ```
+
+Run a live local-model validation after the engine and model are installed. It checks model discovery, non-empty answers, streaming latency, terminal token metrics, and measured generation speed:
+
+```powershell
+node scripts/validate-local-model.mjs
+node scripts/validate-local-model.mjs --check-cancellation
+node scripts/validate-local-model.mjs --runs=3
+node scripts/validate-local-model.mjs --profiles=eco,balanced,deep --runs=3
+```
+
+`--runs` repeats the same prompt per selected profile (capped at 20). `--profiles` accepts
+any comma-separated combination of `eco`, `balanced`, and `deep`. The report compares
+average/minimum/maximum latency and throughput, plus the model's loaded memory residency
+when Ollama exposes it through `/api/ps`.
 
 Framework checks require Python 3.10 or newer:
 

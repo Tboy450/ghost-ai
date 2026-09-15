@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { readFile, saveFile, safeFile, listFiles } from '../core.mjs';
+import { readFile, saveFile, safeFile, listFiles, modelStream } from '../core.mjs';
 import { packContext, itemize, estimateTokens, relevantFile, PROFILES } from '../memory.mjs';
 
 test('file saves create an exact backup and reject stale writes',()=>{
@@ -58,5 +58,44 @@ test('each profile reserves output and keeps the latest request unchanged',()=>{
     assert.equal(result.messages.at(-1).content,'New instruction wins.');
     assert.ok(!JSON.stringify(result.messages).includes('failed answer'));
     assert.ok(result.stats.estimatedInputTokens+result.stats.outputReserve<result.stats.contextLimit);
+  }
+});
+
+test('model streaming exposes tokens and terminal metrics',async()=>{
+  const server = await import('node:http').then(({default:http}) => new Promise(resolve => {
+    const fixture = http.createServer((req,res)=>{
+      res.setHeader('Content-Type','application/x-ndjson');
+      res.write(JSON.stringify({message:{content:'Hello '}})+'\n');
+      res.end(JSON.stringify({message:{content:'Ghost.'},done:true,eval_count:2,prompt_eval_count:7,total_duration:2e9,eval_duration:1e9})+'\n');
+    });
+    fixture.listen(0,'127.0.0.1',()=>resolve(fixture));
+  }));
+  try {
+    const events = [];
+    for await (const event of modelStream(`http://127.0.0.1:${server.address().port}`,'fixture',[],new AbortController().signal)) events.push(event);
+    assert.deepEqual(events.map(event=>event.type),['token','token','metrics']);
+    assert.equal(events.filter(event=>event.type==='token').map(event=>event.text).join(''),'Hello Ghost.');
+    assert.deepEqual(events.at(-1),{type:'metrics',tokens:2,promptTokens:7,seconds:2,generationSeconds:1,finishReason:'stop'});
+  } finally {
+    await new Promise(resolve=>server.close(resolve));
+  }
+});
+
+test('model streaming stops when its signal is aborted',async()=>{
+  const http = await import('node:http').then(module=>module.default);
+  const server = http.createServer((req,res)=>{
+    res.setHeader('Content-Type','application/x-ndjson');
+    res.write(JSON.stringify({message:{content:'first'}})+'\n');
+    setTimeout(()=>res.end(JSON.stringify({message:{content:'late'},done:true})+'\n'),1000);
+  });
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  const controller = new AbortController();
+  try {
+    const stream = modelStream(`http://127.0.0.1:${server.address().port}`,'fixture',[],controller.signal);
+    assert.equal((await stream.next()).value.text,'first');
+    controller.abort();
+    await assert.rejects(async()=>{ for await (const _event of stream) {} },error=>error.name==='AbortError');
+  } finally {
+    await new Promise(resolve=>server.close(resolve));
   }
 });
