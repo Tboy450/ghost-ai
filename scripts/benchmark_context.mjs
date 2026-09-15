@@ -1,0 +1,14 @@
+import { performance } from 'node:perf_hooks';
+import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { packContext, estimateTokens } from '../studio/memory.mjs';
+const messages=[{role:'user',content:'Remember: Project Lighthouse must use SQLite and store timestamps in UTC.'}];
+for(let index=0;index<400;index++)messages.push({role:index%2?'assistant':'user',content:`Unrelated planning round ${index}. `+'The orchard has apples and the garden needs watering. '.repeat(30)});
+messages.push({role:'user',content:'Which database and timestamp convention should Project Lighthouse use?'});
+const start=performance.now();
+const packed=packContext(messages,'You are Ghost, a local coding assistant.',null,'balanced');
+const ms=performance.now()-start;
+const fullEstimate=messages.reduce((n,m)=>n+estimateTokens(m.content),0);
+const report={kind:'synthetic_context_planning_benchmark',time:new Date().toISOString(),messages:messages.length,fullHistoryEstimatedTokens:fullEstimate,packedEstimatedTokens:packed.stats.estimatedInputTokens,reductionPercent:Number((100*(1-packed.stats.estimatedInputTokens/fullEstimate)).toFixed(2)),planningMilliseconds:Number(ms.toFixed(2)),recalledOriginalRequirement:packed.messages[0].content.includes('SQLite')&&packed.messages[0].content.includes('UTC'),transcriptRetained:true,limits:'Synthetic lexical-retrieval check; not a model-quality benchmark. Token counts are estimates.'};
+fs.writeFileSync(fileURLToPath(new URL('../docs/context-benchmark.json',import.meta.url)),JSON.stringify(report,null,2)+'\n');
+console.log(JSON.stringify(report,null,2));

@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "status": "prepared_not_run",
+  "case_count": 18,
+  "request_count": 36,
+  "framework_inputs_sha256": {
+    "prompts/priority_loader_prompt.md": "ef9b95f13fd033b13e0ad43844ff1bf4bec0a18541248011aea0bec8d4330f7d",
+    "datasets/adversarial_drift_tests.jsonl": "6d2d4c8860cfeeb171a6b2d6bb33277aaf5cf90c0a514253fcc36da6865a0418",
+    "datasets/subject_test_matrix.jsonl": "66b9de109be09d6975dc5adaf34d298dc4ca1e26b078addb3bb35f21578f8bf7"
+  },
+  "design": "paired prompts; identical output format; framework appended only in treatment",
+  "grading": "keyword score is format coverage only; blind content review required",
+  "requests_sha256": "92e265eba9ee46dda3d775ddf9eb0132b47f0798c66de6529b6d971fa4005c8e"
+}

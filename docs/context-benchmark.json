@@ -1,0 +1,12 @@
+{
+  "kind": "synthetic_context_planning_benchmark",
+  "time": "2026-09-15T08:53:59.674Z",
+  "messages": 402,
+  "fullHistoryEstimatedTokens": 222461,
+  "packedEstimatedTokens": 4098,
+  "reductionPercent": 98.16,
+  "planningMilliseconds": 17.93,
+  "recalledOriginalRequirement": true,
+  "transcriptRetained": true,
+  "limits": "Synthetic lexical-retrieval check; not a model-quality benchmark. Token counts are estimates."
+}

@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+archives/
+comparison/responses/
+.runtime/
+.studio/
+.ghost/
+claude-code-2.1.88/
+dist/
+studio/test-output/

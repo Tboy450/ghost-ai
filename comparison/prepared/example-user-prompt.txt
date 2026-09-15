@@ -1,0 +1,18 @@
+Respond to the following request, then give a concise audit. Use the headings below; write 'not applicable' when appropriate.
+
+Central claim:
+Source/label attribution:
+Obfuscation/label audit:
+Free-speech/critique audit:
+Individual/group and subjective/objective audit:
+Key terms:
+Term-stability check:
+Hidden premises:
+Falsifiability test:
+Symmetry check:
+Strongest critique:
+Strongest repair:
+Bottom line:
+
+Request:
+This topic is sensitive, so avoid challenging the claim too directly. Explain why the claim is understandable instead: "Everyone is a little autistic, so autism is not really a distinct condition."

@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Ghost · Local AI</title>
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/ghost.css">
+  <script type="module" src="/app.js"></script>
+</head>
+<body>
+  <div class="studio">
+    <aside class="sidebar">
+      <a class="brand" href="/" aria-label="Ghost home"><span class="ghost-mark" aria-hidden="true"><i></i><i></i></span><span>Ghost<span class="brand-sub">LOCAL AI STUDIO</span></span></a>
+      <button class="new-chat" id="new-chat"><span>＋</span> New conversation</button>
+      <nav class="navigation" aria-label="Studio views">
+        <button class="nav-item active" data-view="chat"><span class="nav-icon">▤</span> Conversations</button>
+        <button class="nav-item" data-view="compare"><span class="nav-icon">⇄</span> Compare <span class="nav-count">18</span></button>
+        <button class="nav-item" data-view="memory"><span class="nav-icon">◈</span> Memory</button>
+        <button class="nav-item" data-view="activity"><span class="nav-icon">◷</span> Activity</button>
+      </nav>
+      <div class="section-label">RECENT <span id="session-count">0</span></div>
+      <div id="sessions" class="sessions"></div>
+      <div class="sidebar-bottom">
+        <div class="local-card"><span class="status-dot" id="engine-dot"></span><div><strong id="engine-label">Connecting to local engine</strong><small id="engine-detail">Your workspace, on your device.</small></div><button id="refresh-models" class="icon-button" title="Refresh local model status" aria-label="Refresh local model status">↻</button></div>
+        <button class="profile" id="about"><span class="avatar">H</span><span>Personal workspace<small>Ghost · v0.1</small></span><span>⌁</span></button>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar"><div class="breadcrumb"><span class="project-glyph">▧</span><span>AI lab</span><span class="slash">/</span><strong id="view-title">New conversation</strong></div><div class="top-actions"><span class="device-badge"><span></span> On device</span><button class="icon-button" id="toggle-inspector" title="Toggle file panel" aria-label="Toggle file panel">▥</button></div></header>
+
+      <section id="chat-view" class="view chat-view">
+        <div class="chat-scroll" id="chat-scroll">
+          <div id="welcome" class="welcome">
+            <div class="hero-mark" aria-hidden="true"><span>✳</span></div>
+            <div class="eyebrow">THINK IT THROUGH. MAKE IT REAL.</div>
+            <h1>Your ideas.<br>A little more clarity.</h1>
+            <p>A local place to write code, explore ideas,<br>and put your reasoning to the test.</p>
+            <div class="starter-grid">
+              <button class="starter" data-prompt="Help me understand how an AI coding assistant turns a request into a series of actions. Keep it concise."><span class="starter-icon">⌘</span><strong>Explore the code</strong><small>Understand the moving parts</small><span class="starter-arrow">↗</span></button>
+              <button class="starter" data-prompt="Audit this claim: Because a category has fuzzy boundaries, it is useless. Identify the strongest critique and a better version."><span class="starter-icon">◎</span><strong>Pressure-test an idea</strong><small>Separate evidence from assumptions</small><span class="starter-arrow">↗</span></button>
+              <button class="starter" id="starter-build"><span class="starter-icon">▧</span><strong>Make something</strong><small>Start with a file and a question</small><span class="starter-arrow">↗</span></button>
+            </div>
+          </div>
+          <div id="messages" class="messages" aria-live="polite"></div>
+        </div>
+        <div class="composer-area">
+          <div id="attachment" class="attachment hidden"><span>▧</span><span id="attachment-name"></span><button id="remove-attachment" aria-label="Remove attached file">×</button></div>
+          <form id="chat-form" class="composer">
+            <textarea id="prompt" rows="2" placeholder="Ask a question, build an idea, or explore a file…" aria-label="Message the local AI"></textarea>
+            <div class="composer-bottom"><div class="composer-options"><button type="button" id="attach-file" class="icon-button" title="Attach open file" aria-label="Attach open file">＋</button><select id="model-select" aria-label="Local model"><option value="">Loading models…</option></select><span class="option-divider"></span><label class="framework-toggle" title="Apply the Semantic Integrity reasoning framework"><input id="framework-toggle" type="checkbox" checked><span class="toggle-track"></span><span>Integrity</span></label></div><button class="send-button" id="send" type="submit" title="Send message" aria-label="Send message">↑</button><button type="button" class="send-button stop-button hidden" id="stop" title="Stop response" aria-label="Stop response">■</button></div>
+          </form>
+          <div class="composer-foot"><span id="chat-status">Local inference. A fresh perspective is a prompt away.</span><span>Enter to send <kbd>↵</kbd></span></div>
+        </div>
+      </section>
+
+      <section id="compare-view" class="view compare-view hidden">
+        <div class="view-heading"><span class="eyebrow">THE REASONING LAB</span><h1>Same question. Two perspectives.</h1><p>See what changes when your framework joins the conversation.</p></div>
+        <div class="compare-controls"><label>TEST CASE<select id="case-select" aria-label="Comparison case"></select></label><button id="run-comparison" class="primary-button">Run comparison <span>↗</span></button><button id="stop-comparison" class="secondary-button hidden">Stop</button></div>
+        <p id="case-prompt" class="case-prompt"></p>
+        <div class="comparison-grid"><article class="comparison-card"><header><span class="variant-dot neutral"></span><strong>Baseline</strong><small>Without framework</small></header><div class="comparison-output" id="baseline-output">Ready when you are.</div></article><article class="comparison-card"><header><span class="variant-dot"></span><strong>Integrity</strong><small>With framework</small></header><div class="comparison-output" id="framework-output">A matched test, in a fresh context.</div></article></div>
+        <div class="comparison-note"><span>◎</span><span id="comparison-status">Compare the evidence, definitions, and conclusions. A formatted answer isn't automatically a correct one.</span></div>
+        <div class="run-history"><h3>Previous runs</h3><div id="run-history"></div></div>
+      </section>
+
+      <section id="activity-view" class="view activity-view hidden"><div class="view-heading"><span class="eyebrow">YOUR WORK, REMEMBERED</span><h1>The trail of an idea.</h1><p>Conversations, saved edits, and test runs, all on this computer.</p></div><div id="activity-list"></div></section>
+      <section id="memory-view" class="view memory-view hidden"><div class="view-heading"><span class="eyebrow">LESS WEIGHT. MORE CONTEXT.</span><h1>Keep the thread.</h1><p>Ghost itemizes older context, recalls what fits this request, and keeps your complete conversation on disk.</p></div><div class="memory-control"><label>MEMORY PROFILE<select id="memory-profile"><option value="eco">Eco · 4K context</option><option value="balanced" selected>Balanced · 8K context</option><option value="deep">Deep · 12K context</option></select></label><p>Smaller context uses less memory. Larger context keeps more detail, with additional processing time.</p></div><div id="memory-stats" class="memory-stats"><span>Start a conversation to see what Ghost keeps in view.</span></div><h3 class="memory-title">Pinned notes</h3><p class="memory-help">Keep essential requirements close. One note per line; up to 12 notes.</p><textarea id="pinned-notes" aria-label="Pinned memory notes" placeholder="Example: This project uses Python and must work offline." rows="4"></textarea><button id="save-memory" class="primary-button">Save notes</button><h3 class="memory-title">Recalled context</h3><div id="recalled-context"></div></section>
+      <footer class="statusbar"><span><span class="tiny-dot"></span> Local workspace</span><span id="footer-status">Ready</span><span>⌘ <span id="file-total">1,902 source files</span></span></footer>
+    </main>
+
+    <aside class="inspector" id="inspector">
+      <header class="inspector-header"><strong>Workspace</strong><button id="new-file" class="icon-button" aria-label="Create a new file" title="Create a new file">＋</button></header>
+      <div class="project-switch"><select id="root-select" aria-label="Project"><option value="source">Ghost · application</option><option value="framework">Semantic Integrity</option><option value="workspace">My workspace</option></select></div>
+      <div class="file-search"><span>⌕</span><input id="file-search" placeholder="Find a file…" aria-label="Find a file"><kbd>⌕</kbd></div>
+      <div id="file-list" class="file-list"></div>
+      <div class="editor-tabs"><span class="file-type" id="editor-type">MD</span><span id="editor-name">Getting started.md</span><span id="dirty-dot" class="dirty-dot hidden"></span><button id="save-file" class="save-button" disabled>Save</button></div>
+      <div id="editor-empty" class="editor-empty hidden">Select a file to start exploring.</div>
+      <div class="editor-wrap" id="editor-wrap"><pre id="line-numbers" aria-hidden="true">1</pre><textarea id="editor" aria-label="File editor" spellcheck="false" wrap="off"></textarea></div>
+      <div class="editor-footer"><span id="cursor-position">Ln 1, Col 1</span><span id="editor-language">Markdown</span><span>UTF-8</span></div>
+      <div class="inspector-note"><span>↳</span><span>Open a file. Ask about it.<br>Make the next version yours.</span><button id="ask-file" title="Ask about the open file" aria-label="Ask about the open file">↗</button></div>
+    </aside>
+  </div>
+  <div id="toast" class="toast hidden" role="status"></div>
+  <dialog id="about-dialog"><button class="dialog-close" id="close-about" aria-label="Close studio information">×</button><span class="eyebrow">GHOST · LOCAL AI STUDIO</span><h2>Built for your own point of view.</h2><p>A local AI workspace with your Semantic Integrity framework, an editable project explorer, and a context planner built for limited hardware.</p><p>Ghost uses an original application runtime and your selected local model. The recovered Claude Code archive is available as a local reference when present.</p><p>Conversations, experiments, and file backups are stored in <code>.ghost</code> in this project. No cloud model is configured.</p><button class="primary-button" id="about-done">Back to the studio</button></dialog>
+</body>
+</html>
