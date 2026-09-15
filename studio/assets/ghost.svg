@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <title>Ghost local AI studio</title>
+  <rect x="12" y="12" width="232" height="232" rx="54" fill="#1b1c1f" stroke="#343f33" stroke-width="4"/>
+  <path d="M64 130C64 84 89 54 128 54S192 84 192 130V207L170 191 149 207 128 191 107 207 86 191 64 207Z" fill="#c0dd9d"/>
+  <rect x="96" y="116" width="17" height="28" rx="8.5" fill="#293026"/>
+  <rect x="143" y="116" width="17" height="28" rx="8.5" fill="#293026"/>
+</svg>

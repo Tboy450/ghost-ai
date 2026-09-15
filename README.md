@@ -8,6 +8,14 @@ On this computer, double-click **Start Ghost.cmd**.
 
 Then open **http://127.0.0.1:4317**. The launcher starts the local model engine and application in the background.
 
+To add a **Ghost** desktop shortcut with the Ghost icon, run:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Install-DesktopShortcut.ps1
+```
+
+The shortcut starts the same launcher from this project folder. Run the installer again after moving the project, removing or renaming an older Ghost shortcut if it points to the previous location.
+
 ### Features
 
 - Saved conversations with streaming local AI responses and cancellation.
