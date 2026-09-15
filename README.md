@@ -44,6 +44,7 @@ The Memory panel shows what was recalled. This is fast extractive retrieval, not
 - Layout and styles: `studio/public/`
 - Reasoning framework: `ai-bias-and-creation/prompts/priority_loader_prompt.md`
 - Implementation progress: `docs/IMPLEMENTATION_CHECKLIST.md`
+- Performance baseline and hardware tuning notes: `docs/PERFORMANCE.md`
 
 You can open these files in Ghost's project panel or in your usual editor. Backend edits take effect after restarting the server. Reload the browser after frontend edits.
 
