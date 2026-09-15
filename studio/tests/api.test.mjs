@@ -55,6 +55,28 @@ test('API streams and persists chat, protects writes, and saves both comparison 
     const runs=await fetch(origin+'/api/runs').then(r=>r.json());
     assert.equal(runs[0].review,'pending');
     assert.equal(runs[0].results.length,2);
+    const otherDir=fs.mkdtempSync(path.join(os.tmpdir(),'ghost-project-b-'));
+    const opened=await request('/api/projects',{path:otherDir,name:'Project B'}).then(r=>r.json());
+    assert.equal(opened.name,'Project B');
+    const bootAfterOpen=await fetch(origin+'/api/bootstrap').then(r=>r.json());
+    assert.equal(bootAfterOpen.activeProject.id, opened.id);
+    assert.equal(bootAfterOpen.sessions.length,0);
+    const secondCreate=await request('/api/file',{name:'other.md'}).then(r=>r.json());
+    assert.equal(secondCreate.path,'other.md');
+    assert.equal((await fetch(origin+`/api/file?root=workspace&path=demo.md`)).status,404);
+    const original2=await fetch(origin+'/api/file?root=workspace&path=other.md').then(r=>r.json());
+    assert.ok(original2.content===''); 
+    const switched=await request('/api/projects/active',{id:boot.activeProject.id},'PUT').then(r=>r.json());
+    assert.equal(switched.id, boot.activeProject.id);
+    const bootAfterSwitch=await fetch(origin+'/api/bootstrap').then(r=>r.json());
+    assert.equal(bootAfterSwitch.sessions.length,1);
+    assert.equal((await fetch(origin+'/api/file?root=workspace&path=demo.md')).status,200);
+    const projectList=await fetch(origin+'/api/projects').then(r=>r.json());
+    assert.equal(projectList.projects.length,2);
+    const closed=await fetch(origin+`/api/projects?id=${opened.id}`,{method:'DELETE',headers}).then(r=>r.json());
+    assert.equal(closed.projects.length,1);
+    assert.equal(closed.id, boot.activeProject.id);
+    fs.rmSync(fs.realpathSync(otherDir),{recursive:true,force:true});
   }finally{
     child.kill();await once(child,'exit').catch(()=>{});
     await new Promise(resolve=>fake.close(resolve));

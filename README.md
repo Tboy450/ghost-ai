@@ -36,6 +36,15 @@ Ghost keeps the complete transcript on disk, itemizes older user messages, retri
 
 The Memory panel shows what was recalled. This is fast extractive retrieval, not a guarantee of perfect memory. Critical facts can be pinned. See [architecture](docs/GHOST_ARCHITECTURE.md) and [test results](docs/RESULTS.md).
 
+## Projects
+
+Ghost can hold multiple projects at once. A project is any folder on disk; its conversations,
+memory, comparison runs, and file backups live inside that folder's own `.ghost/` directory, so
+the whole project stays portable and self-contained. Use the project switcher next to the "AI
+lab" breadcrumb at the top of the window to see the active project, switch to another already-open
+project, or open a new folder as a project (`＋`). A small registry of known projects (and which
+one is active) is kept in Ghost's own config directory.
+
 ## Edit the source
 
 - Main backend: `studio/server.mjs`
