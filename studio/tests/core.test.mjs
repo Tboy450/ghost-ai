@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { readFile, saveFile, safeFile, listFiles, modelStream } from '../core.mjs';
+import { readFile, saveFile, safeFile, listFiles, searchProject, modelStream } from '../core.mjs';
 import { packContext, packAdaptive, itemize, estimateTokens, relevantFile, PROFILES } from '../memory.mjs';
 
 test('file saves create an exact backup and reject stale writes',()=>{
@@ -19,6 +19,23 @@ test('file saves create an exact backup and reject stale writes',()=>{
     for(const name of ['../note.md','/note.md','C:/note.md','note.md:secret','x\\note.md','.git/config','file.exe']) assert.throws(()=>safeFile(dir,name));
     assert.deepEqual(listFiles(dir),['note.md']);
   }finally{const resolved=fs.realpathSync(dir);assert.ok(resolved.startsWith(fs.realpathSync(os.tmpdir())+path.sep+'ghost-files-'));fs.rmSync(resolved,{recursive:true,force:true});}
+});
+
+test('project search finds matching lines across files, case-insensitively', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ghost-search-'));
+  try {
+    fs.writeFileSync(path.join(dir, 'a.md'), 'first line\nUses SQLite here\nlast line');
+    fs.mkdirSync(path.join(dir, 'sub'));
+    fs.writeFileSync(path.join(dir, 'sub', 'b.py'), 'def sqlite_setup():\n    pass');
+    const results = searchProject(dir, 'sqlite');
+    assert.equal(results.length, 2);
+    assert.ok(results.some(r => r.path === 'a.md' && r.line === 2));
+    assert.ok(results.some(r => r.path === 'sub/b.py' && r.line === 1));
+    assert.deepEqual(searchProject(dir, ''), []);
+    assert.deepEqual(searchProject(dir, 'nomatch'), []);
+  } finally {
+    fs.rmSync(fs.realpathSync(dir), {recursive: true, force: true});
+  }
 });
 
 test('long histories recall an old relevant constraint and stay within the budget',()=>{

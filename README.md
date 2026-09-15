@@ -49,6 +49,17 @@ lab" breadcrumb at the top of the window to see the active project, switch to an
 project, or open a new folder as a project (`＋`). A small registry of known projects (and which
 one is active) is kept in Ghost's own config directory.
 
+## Editor
+
+The workspace editor supports several open files at once: each file you open gets its own tab
+in the strip above the code area, and switching tabs keeps any unsaved edits in the files you're
+not currently looking at. Code is lightly syntax-highlighted (comments, strings, numbers, and
+keywords) for JavaScript/TypeScript, Python, JSON, and Markdown. The file panel's search box can
+toggle (`☰`) from filename filtering to full-text search across every file in the current project
+root. When a chat response's "Use in editor" action would replace the open file's contents, Ghost
+shows a line-by-line diff preview first, so you can review exactly what would change before
+applying it.
+
 ## Edit the source
 
 - Main backend: `studio/server.mjs`

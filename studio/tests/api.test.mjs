@@ -46,6 +46,8 @@ test('API streams and persists chat, protects writes, and saves both comparison 
     const original=await fetch(origin+'/api/file?root=workspace&path=demo.md').then(r=>r.json());
     assert.equal((await request('/api/file',{root:'workspace',path:'demo.md',hash:original.hash,content:'saved'},'PUT')).status,200);
     assert.equal((await request('/api/file',{root:'workspace',path:'demo.md',hash:original.hash,content:'stale'},'PUT')).status,409);
+    const searchResults=await fetch(origin+'/api/search?root=workspace&q=saved').then(r=>r.json());
+    assert.ok(searchResults.results.some(r=>r.path==='demo.md' && r.line===1));
     const caseId=(await fetch(origin+'/api/cases').then(r=>r.json()))[0].id;
     const comparison=await request('/api/compare',{caseId,model:'test-local'}).then(r=>r.text());
     assert.equal(JSON.parse(comparison.trim().split('\n').at(-1)).run.status,'complete');

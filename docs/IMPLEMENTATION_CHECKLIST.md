@@ -50,7 +50,15 @@ the remote commit is verified.
   - [x] The full transcript is still retained on disk regardless of the chosen profile — adaptivity only changes how much of it is itemized/recalled into a given request, per step 4's recall layer.
   - [x] Tests added: `packAdaptive` picks Eco for a short conversation, escalates to a larger profile when a large pinned note would otherwise be dropped, and an explicit profile still bypasses adaptive selection (`studio/tests/core.test.mjs`). End-to-end `/api/chat` with `profile:'auto'` verified via the fixture-backed integration test (`studio/tests/api.test.mjs`).
   - **Result:** Full suite `node --test studio/tests/*.test.mjs` — 18/18 passed, no regressions.
-- [ ] **6. Upgrade the editor**
+- [x] **6. Upgrade the editor**
+  - [x] Added syntax highlighting: a new dependency-free `studio/public/highlight.js` tokenizes JS/TS, Python, JSON, and Markdown into comment/string/number/keyword spans, rendered as a `<pre>` overlay behind a transparent-text `<textarea>` (classic overlay technique, scroll-synced), so typing and selection still use the native textarea.
+  - [x] Added real multi-file tabs: `state.openFiles` tracks every opened file with its own in-memory draft and dirty flag; a new tab strip (`#editor-tab-strip`) lets you switch between open files without losing unsaved edits in the others, close a tab (with a discard-confirmation if dirty), and automatically evicts the oldest clean tab past 8 open files.
+  - [x] Added project-wide search: a new `searchProject()` in `studio/core.mjs` and `GET /api/search?root=&q=` route search file *contents* (not just names) across every file in the selected root; the file panel's search box now has a toggle (`⌕`/`☰`) to switch between filename filtering and content search, showing file/line/snippet results.
+  - [x] Added previews of proposed edits: a new dependency-free `studio/public/diff.js` computes a line-based diff (LCS backtrace) with context-collapsing for long unchanged runs; the chat's "Use in editor" action now opens a diff-preview dialog (added/removed lines highlighted) instead of silently overwriting the editor, with explicit Apply/Cancel.
+  - [x] Guarded project switching/opening (`switchProject`/`openProjectFolder`, which reload the page) with an unsaved-changes confirmation across all open tabs, not just the active one.
+  - [x] Tests added: `studio/tests/editor.test.mjs` (10 tests — diff correctness, context-collapsing, JS/Python tokenization, HTML escaping, unknown-language fallback); `searchProject` unit test in `studio/tests/core.test.mjs`; end-to-end `/api/search` test in `studio/tests/api.test.mjs`.
+  - [x] Manual smoke test: started the real server, confirmed `/diff.js` and `/highlight.js` serve as `text/javascript`, and `GET /api/search?root=workspace&q=Ghost` returns a matching line from `Getting started.md`.
+  - **Result:** Full suite `node --test studio/tests/*.test.mjs` — 28/28 passed, no regressions.
 - [ ] **7. Add Git integration**
 - [ ] **8. Add assisted coding and testing**
 - [ ] **9. Strengthen framework comparisons**
@@ -71,5 +79,7 @@ the remote commit is verified.
 | 2026-09-15 | Step 3 manual verification | Complete | Live server: opened a second project, confirmed session/file isolation, switched back, confirmed restoration |
 | 2026-09-15 | Step 4 recall tests | Passed | `node --test studio/tests/*.test.mjs` — 15/15 passed (paraphrase recall, supersession, source references) |
 | 2026-09-15 | Step 5 adaptive context tests | Passed | `node --test studio/tests/*.test.mjs` — 18/18 passed (adaptive profile escalation + end-to-end `/api/chat` with `profile:'auto'`) |
+| 2026-09-15 | Step 6 editor upgrade tests | Passed | `node --test studio/tests/*.test.mjs` — 28/28 passed (diff/highlight unit tests, `searchProject` unit test, end-to-end `/api/search`) |
+| 2026-09-15 | Step 6 manual verification | Complete | Live server: `/diff.js` and `/highlight.js` served correctly; `/api/search?root=workspace&q=Ghost` returned the expected match |
 
 Update this file whenever a roadmap item is attempted, completed, or blocked.

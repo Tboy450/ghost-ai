@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomBytes, randomUUID } from 'node:crypto';
-import { listFiles, readFile, saveFile, modelStream, BASE_PROMPT } from './core.mjs';
+import { listFiles, readFile, saveFile, searchProject, modelStream, BASE_PROMPT } from './core.mjs';
 import { packContext, packAdaptive, PROFILES } from './memory.mjs';
 import { openProject, listProjects, activeProject, switchProject, closeProject, ensureProjectDirs } from './projects.mjs';
 
@@ -176,6 +176,7 @@ const server=http.createServer(async(req,res)=>{
       return json(res,200,{id:project.id,name:project.name,path:project.path,projects:listProjects(REGISTRY_PATH)});
     }
     if (req.method==='GET' && url.pathname==='/api/files') return json(res,200,{files:listFiles(rootFor(url.searchParams.get('root')))});
+    if (req.method==='GET' && url.pathname==='/api/search') return json(res,200,{results:searchProject(rootFor(url.searchParams.get('root')),url.searchParams.get('q'))});
     if (req.method==='GET' && url.pathname==='/api/file') return json(res,200,readFile(rootFor(url.searchParams.get('root')),url.searchParams.get('path')));
     if (req.method==='PUT' && url.pathname==='/api/file') { const input=await body(req); const result=saveFile(rootFor(input.root),input.path,input.content,input.hash,dirs.backups);eventLog('file_saved',`${input.root}/${input.path}`);return json(res,200,result); }
     if (req.method==='POST' && url.pathname==='/api/file') {
@@ -196,7 +197,7 @@ const server=http.createServer(async(req,res)=>{
     if (req.method==='POST' && url.pathname==='/api/compare') return await compare(req,res,await body(req));
     if (req.method==='GET' && url.pathname==='/api/runs') return json(res,200,fs.readdirSync(dirs.runs).filter(n=>n.endsWith('.json')).map(n=>JSON.parse(fs.readFileSync(path.join(dirs.runs,n),'utf8'))).sort((a,b)=>b.time.localeCompare(a.time)));
     if (req.method==='GET' && url.pathname==='/api/activity') { const activityPath=path.join(dirs.ghost,'activity.jsonl'); return json(res,200,fs.existsSync(activityPath)?fs.readFileSync(activityPath,'utf8').trim().split('\n').filter(Boolean).map(JSON.parse).reverse().slice(0,100):[]); }
-    const assets={'/':'index.html','/app.js':'app.js','/styles.css':'styles.css','/ghost.css':'ghost.css'};
+    const assets={'/':'index.html','/app.js':'app.js','/diff.js':'diff.js','/highlight.js':'highlight.js','/styles.css':'styles.css','/ghost.css':'ghost.css'};
     if (req.method==='GET' && assets[url.pathname]) {
       const file=assets[url.pathname];res.writeHead(200,{'Content-Type':file.endsWith('.js')?'text/javascript':file.endsWith('.css')?'text/css':'text/html'});return res.end(fs.readFileSync(path.join(HERE,'public',file)));
     }

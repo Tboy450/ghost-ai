@@ -71,16 +71,18 @@
     <aside class="inspector" id="inspector">
       <header class="inspector-header"><strong>Workspace</strong><button id="new-file" class="icon-button" aria-label="Create a new file" title="Create a new file">＋</button></header>
       <div class="project-switch"><select id="root-select" aria-label="Project"><option value="source">Ghost · application</option><option value="framework">Semantic Integrity</option><option value="workspace">My workspace</option></select></div>
-      <div class="file-search"><span>⌕</span><input id="file-search" placeholder="Find a file…" aria-label="Find a file"><kbd>⌕</kbd></div>
+      <div class="file-search"><span>⌕</span><input id="file-search" placeholder="Find a file…" aria-label="Find a file"><button id="search-mode" class="icon-button" title="Search inside files" aria-label="Search inside files" aria-pressed="false">☰</button></div>
       <div id="file-list" class="file-list"></div>
+      <div id="editor-tab-strip" class="editor-tab-strip"></div>
       <div class="editor-tabs"><span class="file-type" id="editor-type">MD</span><span id="editor-name">Getting started.md</span><span id="dirty-dot" class="dirty-dot hidden"></span><button id="save-file" class="save-button" disabled>Save</button></div>
       <div id="editor-empty" class="editor-empty hidden">Select a file to start exploring.</div>
-      <div class="editor-wrap" id="editor-wrap"><pre id="line-numbers" aria-hidden="true">1</pre><textarea id="editor" aria-label="File editor" spellcheck="false" wrap="off"></textarea></div>
+      <div class="editor-wrap" id="editor-wrap"><pre id="line-numbers" aria-hidden="true">1</pre><div class="editor-code"><pre id="highlight-layer" aria-hidden="true"><code id="highlight-code"></code></pre><textarea id="editor" aria-label="File editor" spellcheck="false" wrap="off"></textarea></div></div>
       <div class="editor-footer"><span id="cursor-position">Ln 1, Col 1</span><span id="editor-language">Markdown</span><span>UTF-8</span></div>
       <div class="inspector-note"><span>↳</span><span>Open a file. Ask about it.<br>Make the next version yours.</span><button id="ask-file" title="Ask about the open file" aria-label="Ask about the open file">↗</button></div>
     </aside>
   </div>
   <div id="toast" class="toast hidden" role="status"></div>
   <dialog id="about-dialog"><button class="dialog-close" id="close-about" aria-label="Close studio information">×</button><span class="eyebrow">GHOST · LOCAL AI STUDIO</span><h2>Built for your own point of view.</h2><p>A local AI workspace with your Semantic Integrity framework, an editable project explorer, and a context planner built for limited hardware.</p><p>Ghost uses an original application runtime and your selected local model. The recovered Claude Code archive is available as a local reference when present.</p><p>Conversations, experiments, and file backups are stored in <code>.ghost</code> in this project. No cloud model is configured.</p><button class="primary-button" id="about-done">Back to the studio</button></dialog>
+  <dialog id="diff-dialog" class="diff-dialog"><button class="dialog-close" id="close-diff" aria-label="Close preview">×</button><span class="eyebrow">PREVIEW BEFORE YOU APPLY</span><h2>Proposed change</h2><p id="diff-target"></p><div id="diff-view" class="diff-view"></div><div class="dialog-actions"><button class="secondary-button" id="cancel-diff">Cancel</button><button class="primary-button" id="apply-diff">Apply to editor</button></div></dialog>
 </body>
 </html>
