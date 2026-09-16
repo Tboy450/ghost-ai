@@ -2,6 +2,7 @@
 // Every function takes `root` (the project's folder) and shells out with cwd=root;
 // no shell interpolation is used (spawnSync argv arrays only).
 import { spawnSync } from 'node:child_process';
+import fs from 'node:fs';
 
 function run(root, args) {
   const result = spawnSync('git', args, {cwd: root, encoding: 'utf8', maxBuffer: 20 * 1024 * 1024});
@@ -100,13 +101,18 @@ export function addWorktree(root, worktreeDir, branch) {
   run(root, ['worktree', 'prune']);
   let result = run(root, ['worktree', 'add', '-B', branch, worktreeDir, 'HEAD']);
   if (result.status !== 0 && /already used by worktree/i.test(result.stderr || '')) {
-    // Still held, so the recorded directory survived but is not ours to keep. Detach it
-    // and retry once; a worktree for an automated branch is disposable by design.
+    // Still held after a prune, so the recorded directory is really there. Only a
+    // directory that has vanished may be cleared: force-removing a live one destroys
+    // whatever is running in it, and these branches are shared, so the holder can be a
+    // legitimate concurrent run — including an outer run whose own test suite is what
+    // called us. That mistake deleted a running update out from under itself.
     const stale = (result.stderr.match(/worktree at '([^']+)'/) || [])[1];
-    if (stale) {
+    if (stale && !fs.existsSync(stale)) {
       run(root, ['worktree', 'remove', stale, '--force']);
       run(root, ['worktree', 'prune']);
       result = run(root, ['worktree', 'add', '-B', branch, worktreeDir, 'HEAD']);
+    } else if (stale) {
+      throw fail(`Another update is already using the branch ${branch} in ${stale}. Wait for it to finish, or delete that folder if nothing is running.`, 409);
     }
   }
   if (result.status !== 0) throw fail(result.stderr || 'Could not create a worktree for the update branch.', 500);

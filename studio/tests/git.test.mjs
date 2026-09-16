@@ -85,6 +85,28 @@ test('addWorktree recovers when a killed run left its worktree registered', () =
   }
 });
 
+// The stale-worktree recovery must never touch a worktree that is really there. An
+// automated branch is shared, so the holder can be a legitimate concurrent run - and
+// force-removing it deletes a running update's directory out from under it.
+test('a live worktree on the same branch is reported, never deleted', () => {
+  const repo = makeRepo();
+  const held = fs.mkdtempSync(path.join(os.tmpdir(), 'ghost-held-'));
+  fs.rmSync(held, {recursive: true, force: true});
+  const second = fs.mkdtempSync(path.join(os.tmpdir(), 'ghost-second-'));
+  fs.rmSync(second, {recursive: true, force: true});
+  try {
+    git.addWorktree(repo, held, 'ghost/self-update');
+    fs.writeFileSync(path.join(held, 'work-in-progress.md'), 'do not delete me\n');
+    assert.throws(() => git.addWorktree(repo, second, 'ghost/self-update'), /already using the branch/);
+    assert.equal(fs.readFileSync(path.join(held, 'work-in-progress.md'), 'utf8'), 'do not delete me\n');
+  } finally {
+    try { git.removeWorktree(repo, held); } catch { /* cleanup */ }
+    fs.rmSync(repo, {recursive: true, force: true});
+    fs.rmSync(held, {recursive: true, force: true});
+    fs.rmSync(second, {recursive: true, force: true});
+  }
+});
+
 test('addWorktree/removeWorktree isolate changes on a dedicated branch', () => {
   const repo = makeRepo();
   const originalBranch = git.currentBranch(repo);

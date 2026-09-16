@@ -9,8 +9,29 @@ import {
   PROVIDERS, listProviders, getFocus, setFocus, advanceFocus,
   callProvider, parseProposal, applyProposal, runCycle, listHistory,
   setProviderKey, clearProviderKey, resolveKey, testProvider,
-  gatherContext, isProtectedPath,
+  gatherContext, isProtectedPath, runTests,
 } from '../selfimprove.mjs';
+
+// A suite that never returns used to hold the worktree and the update branch open
+// forever, leaving a spinner and no report at all. A real apply wedged for over ten
+// minutes this way. It has to end as an ordinary failure, which is the safe path.
+test('a test suite that never finishes is stopped and reported as a failure', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ghost-hang-'));
+  fs.mkdirSync(path.join(dir, 'studio', 'tests'), {recursive: true});
+  fs.writeFileSync(path.join(dir, 'studio', 'tests', 'hang.test.mjs'),
+    `import test from 'node:test';\ntest('never finishes', async () => { await new Promise(() => {}); });\n`);
+  try {
+    const started = Date.now();
+    const result = runTests(dir, 'studio/tests/*.test.mjs', {timeoutMs: 3000});
+    assert.equal(result.passed, false);
+    assert.equal(result.timedOut, true);
+    assert.match(result.output, /did not finish within/);
+    assert.match(result.output, /nothing in your project changed/);
+    assert.ok(Date.now() - started < 60000, 'it must give up near its deadline, not run on');
+  } finally {
+    fs.rmSync(dir, {recursive: true, force: true});
+  }
+});
 
 function run(dir, args) { return spawnSync('git', args, {cwd: dir, encoding: 'utf8'}); }
 

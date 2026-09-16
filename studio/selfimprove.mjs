@@ -247,13 +247,23 @@ export function applyProposal(root, proposal) {
   return written;
 }
 
-export function runTests(root, testGlob) {
+export const TEST_TIMEOUT_MS = 10 * 60 * 1000;
+
+export function runTests(root, testGlob, {timeoutMs = TEST_TIMEOUT_MS} = {}) {
   // Strip Node's own test-runner recursion-guard env vars so a nested `node --test`
   // run (e.g. this cycle's own tests, invoked from inside another `node --test` run)
   // actually executes instead of being silently skipped as a "recursive" run.
   const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('NODE_TEST')));
-  const result = spawnSync(process.execPath, ['--test', testGlob], {cwd: root, encoding: 'utf8', maxBuffer: 20 * 1024 * 1024, env});
+  const result = spawnSync(process.execPath, ['--test', testGlob], {cwd: root, encoding: 'utf8', maxBuffer: 20 * 1024 * 1024, env, timeout: timeoutMs, killSignal: 'SIGKILL'});
   const output = `${result.stdout || ''}${result.stderr || ''}`;
+  // A suite that never returns is the worst outcome: it holds the worktree and the
+  // update branch open indefinitely, and the person is left watching a spinner with no
+  // report at all. A real run wedged here for over ten minutes. Treat it as a plain
+  // failure, which is already the safe path: nothing is committed, nothing changes.
+  if (result.error?.code === 'ETIMEDOUT' || result.signal === 'SIGKILL') {
+    const minutes = Math.round(timeoutMs / 60000);
+    return {passed: false, timedOut: true, output: `${output.slice(-8000)}\n\nThe test suite did not finish within ${minutes} minutes and was stopped. Nothing was committed and nothing in your project changed.`};
+  }
   return {passed: result.status === 0, output: output.slice(-8000)};
 }
 
