@@ -48,15 +48,9 @@ test('API streams and persists chat, protects writes, and saves both comparison 
     assert.equal((await request('/api/file',{root:'workspace',path:'demo.md',hash:original.hash,content:'stale'},'PUT')).status,409);
     const searchResults=await fetch(origin+'/api/search?root=workspace&q=saved').then(r=>r.json());
     assert.ok(searchResults.results.some(r=>r.path==='demo.md' && r.line===1));
-    const caseId=(await fetch(origin+'/api/cases').then(r=>r.json()))[0].id;
-    const comparison=await request('/api/compare',{caseId,model:'test-local'}).then(r=>r.text());
-    assert.equal(JSON.parse(comparison.trim().split('\n').at(-1)).run.status,'complete');
-    assert.deepEqual(requests[1].messages[1],requests[2].messages[1]);
-    assert.ok(!requests[1].messages[0].content.includes('Priority Loader Prompt'));
-    assert.ok(requests[2].messages[0].content.includes('Priority Loader Prompt'));
-    const runs=await fetch(origin+'/api/runs').then(r=>r.json());
-    assert.equal(runs[0].review,'pending');
-    assert.equal(runs[0].results.length,2);
+    assert.equal((await fetch(origin+'/api/cases')).status,404);
+    assert.equal((await request('/api/compare',{caseId:'x',model:'test-local'})).status,404);
+    assert.deepEqual(await fetch(origin+'/api/runs').then(r=>r.json()),[]);
     const autoResult=await request('/api/chat',{sessionId:session.id,model:'test-local',prompt:'Follow up question.',framework:true,profile:'auto'}).then(r=>r.text());
     const autoEvents=autoResult.trim().split('\n').map(JSON.parse);
     const autoContext=autoEvents.find(e=>e.type==='context');

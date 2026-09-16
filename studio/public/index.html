@@ -14,7 +14,6 @@
       <button class="new-chat" id="new-chat"><span>＋</span> New conversation</button>
       <nav class="navigation" aria-label="Studio views">
         <button class="nav-item active" data-view="chat"><span class="nav-icon">▤</span> Conversations</button>
-        <button class="nav-item" data-view="compare"><span class="nav-icon">⇄</span> Compare <span class="nav-count">18</span></button>
         <button class="nav-item" data-view="memory"><span class="nav-icon">◈</span> Memory</button>
         <button class="nav-item" data-view="activity"><span class="nav-icon">◷</span> Activity</button>
         <button class="nav-item" data-view="git"><span class="nav-icon">⎇</span> Git</button>
@@ -56,14 +55,6 @@
         </div>
       </section>
 
-      <section id="compare-view" class="view compare-view hidden">
-        <div class="view-heading"><span class="eyebrow">THE REASONING LAB</span><h1>Same question. Two perspectives.</h1><p>See what changes when your framework joins the conversation.</p></div>
-        <div class="compare-controls"><label>TEST CASE<select id="case-select" aria-label="Comparison case"></select></label><button id="run-comparison" class="primary-button">Run comparison <span>↗</span></button><button id="stop-comparison" class="secondary-button hidden">Stop</button></div>
-        <p id="case-prompt" class="case-prompt"></p>
-        <div class="comparison-grid"><article class="comparison-card"><header><span class="variant-dot neutral"></span><strong>Baseline</strong><small>Without framework</small></header><div class="comparison-output" id="baseline-output">Ready when you are.</div></article><article class="comparison-card"><header><span class="variant-dot"></span><strong>Integrity</strong><small>With framework</small></header><div class="comparison-output" id="framework-output">A matched test, in a fresh context.</div></article></div>
-        <div class="comparison-note"><span>◎</span><span id="comparison-status">Compare the evidence, definitions, and conclusions. A formatted answer isn't automatically a correct one.</span></div>
-        <div class="run-history"><h3>Previous runs</h3><div id="run-history"></div></div>
-      </section>
 
       <section id="activity-view" class="view activity-view hidden"><div class="view-heading"><span class="eyebrow">YOUR WORK, REMEMBERED</span><h1>The trail of an idea.</h1><p>Conversations, saved edits, and test runs, all on this computer.</p></div><div id="activity-list"></div></section>
       <section id="git-view" class="view git-view hidden">

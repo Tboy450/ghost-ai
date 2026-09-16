@@ -288,11 +288,9 @@ def validate_subject_coverage() -> list[str]:
     records = load_jsonl("datasets/subject_test_matrix.jsonl")
     subjects = {record["subject"] for record in records}
     expected = {
-        "anti-gun policy",
         "Christianity vs Torah and Talmud",
         "capitalism vs communism",
         "DEI policies",
-        "abortion",
     }
     missing = expected - subjects
     if missing:

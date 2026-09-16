@@ -111,44 +111,6 @@ async function chat(req,res,input) {
     eventLog('chat_error',message);
   } finally { active.delete(session.id); stream.end(); }
 }
-function comparisonCases() {
-  return fs.readFileSync(path.join(ROOT,'comparison/prepared/requests.jsonl'),'utf8').trim().split('\n').map(JSON.parse);
-}
-async function compare(req,res,input) {
-  const requests=comparisonCases().filter(r=>r.case_id===input.caseId);
-  if (requests.length!==2) throw fail('Choose a comparison case.');
-  const status=await modelStatus();
-  const model=status.models.find(m=>m.name===input.model);
-  if (!status.online || !model) throw fail('Select an available local model first.',503);
-  if (active.size) throw fail('The local model is already working. Finish or stop the current task first.',409);
-  active.add('comparison');
-  const run={id:randomUUID(),time:new Date().toISOString(),caseId:input.caseId,model:input.model,modelDigest:model.digest,status:'running',results:[],review:'pending',settings:{temperature:0.35,num_ctx:8192,num_predict:1600}};
-  const save=()=>fs.writeFileSync(path.join(dirs.runs,run.id+'.json'),JSON.stringify(run,null,2));
-  save(); const stream=streamStart(req,res); stream.send({type:'run',run});
-  try {
-    for (const request of requests) {
-      const result={variant:request.variant,content:'',metrics:{}};
-      // Read the CURRENT editable framework for new experiments.
-      const supplement=request.variant==='framework' ? frameworkPrompt() : '';
-      run.frameworkPrompt=supplement || run.frameworkPrompt;
-      stream.send({type:'variant',variant:request.variant});
-      const messages=[{role:'system',content:BASE_PROMPT+(supplement?'\n\n'+supplement:'')},{role:'user',content:request.user_prompt}];
-      for await (const event of modelStream(OLLAMA,input.model,messages,stream.controller.signal)) {
-        if (event.type==='token') result.content+=event.text;
-        if (event.type==='metrics') result.metrics=event;
-        stream.send({...event,variant:request.variant});
-      }
-      if (!result.content.trim()) throw new Error('The model returned an empty answer.');
-      run.results.push(result); save();
-    }
-    run.status='complete'; run.completedCount=run.results.filter(r=>Boolean(r.content)).length;save();
-    eventLog('comparison',`${run.caseId} · ${run.model} · review pending`);
-    stream.send({type:'done',run});
-  } catch(error) {
-    run.status=stream.controller.signal.aborted?'stopped':'failed';run.error=error.message;save();
-    stream.send({type:'error',message:run.status==='stopped'?'Comparison stopped.':error.message});
-  } finally { active.delete('comparison');stream.end(); }
-}
 
 const server=http.createServer(async(req,res)=>{
   res.setHeader('X-Content-Type-Options','nosniff');
@@ -197,8 +159,6 @@ const server=http.createServer(async(req,res)=>{
       session.pinned=input.pinned;saveSession(session);return json(res,200,session);
     }
     if (req.method==='POST' && url.pathname==='/api/chat') return await chat(req,res,await body(req));
-    if (req.method==='GET' && url.pathname==='/api/cases') return json(res,200,comparisonCases().filter(r=>r.variant==='baseline').map(r=>({id:r.case_id,prompt:r.user_prompt.split('Request:\n')[1]})));
-    if (req.method==='POST' && url.pathname==='/api/compare') return await compare(req,res,await body(req));
     if (req.method==='GET' && url.pathname==='/api/runs') return json(res,200,fs.readdirSync(dirs.runs).filter(n=>n.endsWith('.json')).map(n=>JSON.parse(fs.readFileSync(path.join(dirs.runs,n),'utf8'))).sort((a,b)=>b.time.localeCompare(a.time)));
     if (req.method==='GET' && url.pathname==='/api/activity') { const activityPath=path.join(dirs.ghost,'activity.jsonl'); return json(res,200,fs.existsSync(activityPath)?fs.readFileSync(activityPath,'utf8').trim().split('\n').filter(Boolean).map(JSON.parse).reverse().slice(0,100):[]); }
     if (req.method==='GET' && url.pathname==='/api/git/status') return json(res,200,git.status(rootFor(url.searchParams.get('root')||'workspace')));

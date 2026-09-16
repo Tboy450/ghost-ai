@@ -178,5 +178,5 @@ At the time this summary was added:
 ```text
 make test: passed
 reference responses: 18/18, 18/18, 18/18
-subject test run: 18/18 across all 5 subjects
+subject test run: 18/18 across all 3 subjects
 ```

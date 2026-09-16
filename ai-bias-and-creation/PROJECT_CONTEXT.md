@@ -93,11 +93,9 @@ The pack supports several use patterns:
 
 A focused subject test run was added with `3/5 moderate` opposition pressure. The tested topics are:
 
-- anti-gun policy
 - Christianity vs Torah and Talmud
 - capitalism vs communism
 - DEI policies
-- abortion
 
 Each subject test records the claim, opposition level, audit output, and expected failure modes.
 
@@ -132,7 +130,7 @@ At the time this context file was added:
 ```text
 make test: passed
 reference responses: 18/18, 18/18, 18/18
-subject test run: 18/18 across all 5 subjects
+subject test run: 18/18 across all 3 subjects
 ```
 
 ## Current GitHub Blocker

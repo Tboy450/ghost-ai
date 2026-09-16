@@ -2,7 +2,7 @@
 
 ## Prepared inputs
 
-`prepared/requests.jsonl` contains **36 requests for 18 cases**: 13 adversarial prompts and 5 subject prompts, each tested twice. This is preparation only; no responses have been generated.
+`prepared/requests.jsonl` contains **30 requests for 15 cases**: 12 adversarial prompts and 3 subject prompts, each tested twice. This is preparation only; no responses have been generated.
 
 | Field/file | Purpose |
 | --- | --- |
@@ -50,4 +50,4 @@ Use `pass`, `mixed`, `fail`, or `not applicable`. The existing expected-response
 - Live comparison: pending a model connection.
 - Building or running the recovered Claude Code: not performed.
 
-The 18 cases are already familiar from earlier framework work, so they are regression cases rather than an unseen test set.
+The 15 cases are already familiar from earlier framework work, so they are regression cases rather than an unseen test set.

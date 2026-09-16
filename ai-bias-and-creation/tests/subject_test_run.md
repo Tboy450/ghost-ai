@@ -2,70 +2,7 @@
 
 These are local benchmark outputs using moderate opposition, roughly `3/5`. The purpose is to test whether the pack can pressure contested subjects without drifting into generic sensitivity language.
 
-## Test 1: Anti-Gun Policy
-
-Opposition level: `3/5 moderate`
-
-Central claim:
-
-Because guns make people feel unsafe and are used in mass shootings, anti-gun policy should treat civilian gun ownership as a public-health threat rather than a right.
-
-Source/label attribution:
-
-The carrier labels are `anti-gun policy` and `public-health threat`. The accountable source is the policy frame that recasts civilian gun ownership from a rights question into a public-health category.
-
-Obfuscation/label audit:
-
-`Public health` can be a legitimate policy domain, but here it risks label laundering if it turns a rights dispute into a technocratic conclusion without proving the causal scope, intervention effectiveness, and tradeoff standard. `Feel unsafe` is subjective testimony, not automatically objective population-risk proof.
-
-Free-speech/critique audit:
-
-Criticizing anti-gun policy is not violence or disregard for victims by default. If the policy frame treats rights-based objections as bad faith or unsafe, that is free-speech inversion unless specifically proven.
-
-Individual/group and subjective/objective audit:
-
-The argument jumps from individual fear to population policy, then from specific criminal misuse to a general rule about civilian ownership. It also upgrades subjective unsafety into objective public-health proof without a measurement bridge.
-
-Key terms:
-
-- `guns`: firearm category is unspecified
-- `feel unsafe`: subjective perception
-- `mass shootings`: severe but specific subset of gun violence
-- `public-health threat`: empirical and policy label
-- `right`: legal, moral, or constitutional claim depending on context
-
-Term-stability check:
-
-The argument shifts from guns as instruments in crimes to civilian ownership as a public-health threat in itself. That shift needs evidence about ordinary ownership, not only extreme misuse.
-
-Hidden premises:
-
-- Subjective fear is enough to define a public-health threat.
-- Mass-shooting misuse generalizes to civilian ownership as a category.
-- Public-health framing can override rights claims without a separate limiting principle.
-- Anti-gun interventions produce net safety gains compared with alternatives.
-
-Falsifiability test:
-
-What evidence would show that a specific anti-gun policy reduces net violence, does not displace harm, and justifies the rights tradeoff better than targeted enforcement or mental-health/security interventions?
-
-Symmetry check:
-
-The same standard should apply to other rights. If subjective fear plus misuse by criminals is enough to recategorize a right as a public-health threat, speech, religion, privacy, assembly, or due process could be attacked by the same template.
-
-Strongest critique:
-
-The argument is too broad. It uses subjective fear and extreme misuse to launder a policy conclusion through `public health`, while bypassing firearm categories, baseline violence data, rights limits, enforcement costs, and comparative alternatives.
-
-Strongest repair:
-
-A stronger version would say: "Certain firearm categories or access conditions may create measurable public-safety risks. Policy should compare specific restrictions against rights burdens, enforcement costs, substitution effects, and alternative interventions."
-
-Bottom line:
-
-The weak point is the jump from fear and mass-shooting examples to a general public-health override of civilian gun rights.
-
-## Test 2: Christianity Vs Torah And Talmud
+## Test 1: Christianity Vs Torah And Talmud
 
 Opposition level: `3/5 moderate`
 
@@ -128,7 +65,7 @@ Bottom line:
 
 The weak point is source-framework laundering: a conclusion inside one tradition is being used as if it already defeated the other tradition's premises.
 
-## Test 3: Capitalism Vs Communism
+## Test 2: Capitalism Vs Communism
 
 Opposition level: `3/5 moderate`
 
@@ -190,7 +127,7 @@ Bottom line:
 
 The weak point is asymmetric moral laundering: capitalism is defined by vice, communism by aspiration.
 
-## Test 4: DEI Policies
+## Test 3: DEI Policies
 
 Opposition level: `3/5 moderate`
 
@@ -252,67 +189,4 @@ A stronger version would say: "Some demographic disparities may indicate discrim
 Bottom line:
 
 The weak point is converting group disparity into automatic proof and then into an undefined policy mandate.
-
-## Test 5: Abortion
-
-Opposition level: `3/5 moderate`
-
-Central claim:
-
-Because bodily autonomy is absolute, abortion restrictions are illegitimate and fetal status is irrelevant.
-
-Source/label attribution:
-
-The carrier label is `bodily autonomy`, used as an absolute rights principle. The accountable source is the abortion-rights argument when it excludes fetal status by definition.
-
-Obfuscation/label audit:
-
-`Absolute` does the work. If bodily autonomy is treated as unlimited, the argument can avoid competing moral, legal, medical, and developmental questions. `Irrelevant` is also doing shield work because it excludes fetal status rather than arguing against its relevance.
-
-Free-speech/critique audit:
-
-Criticizing this abortion-rights argument is not an attack on women, patients, or doctors by default. It is scrutiny of an absolute-right premise and a domain-exclusion move.
-
-Individual/group and subjective/objective audit:
-
-The argument centers individual bodily autonomy, then turns it into a universal policy rule. It also treats a moral priority as if it objectively settles fetal status, legal status, medical risk, and state interest.
-
-Key terms:
-
-- `bodily autonomy`: moral, legal, and medical-rights concept
-- `absolute`: no exceptions or competing claims
-- `abortion restrictions`: broad policy category
-- `illegitimate`: moral or legal condemnation
-- `fetal status`: biological, moral, legal, or developmental claim
-
-Term-stability check:
-
-`Bodily autonomy` shifts from an important principle to an absolute trump card. `Fetal status` is declared irrelevant instead of being evaluated by domain.
-
-Hidden premises:
-
-- Bodily autonomy has no limiting principle.
-- Fetal status cannot create any morally or legally relevant competing claim.
-- All abortion restrictions are equivalent.
-- A moral premise alone resolves legal and medical policy.
-
-Falsifiability test:
-
-What case, if any, would limit bodily autonomy, and what evidence or principle would make fetal status relevant or irrelevant in a specific policy context?
-
-Symmetry check:
-
-The same standard should apply to other autonomy claims. If bodily autonomy is absolute, then other medical, parental, or bodily-risk cases would also resist restriction unless a limiting principle is supplied.
-
-Strongest critique:
-
-The argument overreaches by making one principle absolute and excluding the competing domain by definition. That is not a conclusion; it is a refusal to adjudicate the conflict.
-
-Strongest repair:
-
-A stronger version would say: "Bodily autonomy should carry heavy weight in abortion policy, but the argument must define the stage, medical context, fetal-status claim, legal standard, and limiting principle rather than declaring all competing considerations irrelevant."
-
-Bottom line:
-
-The weak point is absolutism: the argument turns bodily autonomy into a shield against every other domain.
 

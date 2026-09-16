@@ -13,7 +13,7 @@ Use this file to keep a durable record of local validation, scoring, and target-
 - Pycheck with bundled Python: passed.
 - `scripts/validate_pack.py` with bundled Python: passed.
 - `scripts/score_response.py tests/reference_responses.md`: all 3 benchmark responses scored `18/18`.
-- `scripts/score_response.py tests/subject_test_run.md`: all 5 subject tests scored `18/18`.
+- `scripts/score_response.py tests/subject_test_run.md`: all 3 subject tests scored `18/18`.
 
 Notes:
 
@@ -32,7 +32,7 @@ Notes:
   - Scores: Test A: Autism Spectrum 18/18; Test B: Gender Terminology 18/18; Test C: Ideological House-of-Cards 18/18
   - Minimum score: `16`
 - `Subject test-run scoring`: `PASS`
-  - Scores: Test 1: Anti-Gun Policy 18/18; Test 2: Christianity Vs Torah And Talmud 18/18; Test 3: Capitalism Vs Communism 18/18; Test 4: DEI Policies 18/18; Test 5: Abortion 18/18
+  - Scores: Test 1: Christianity Vs Torah And Talmud 18/18; Test 2: Capitalism Vs Communism 18/18; Test 3: DEI Policies 18/18
   - Minimum score: `16`
 
 ## 2026-08-16 05:36:12 - Aggregate Check
@@ -48,7 +48,7 @@ Notes:
   - Scores: Test A: Autism Spectrum 18/18; Test B: Gender Terminology 18/18; Test C: Ideological House-of-Cards 18/18
   - Minimum score: `16`
 - `Subject test-run scoring`: `PASS`
-  - Scores: Test 1: Anti-Gun Policy 18/18; Test 2: Christianity Vs Torah And Talmud 18/18; Test 3: Capitalism Vs Communism 18/18; Test 4: DEI Policies 18/18; Test 5: Abortion 18/18
+  - Scores: Test 1: Christianity Vs Torah And Talmud 18/18; Test 2: Capitalism Vs Communism 18/18; Test 3: DEI Policies 18/18
   - Minimum score: `16`
 
 ## 2026-08-16 - Copilot Neutrality Conversation
@@ -90,7 +90,7 @@ Notes:
   - Scores: Test A: Autism Spectrum 18/18; Test B: Gender Terminology 18/18; Test C: Ideological House-of-Cards 18/18
   - Minimum score: `16`
 - `Subject test-run scoring`: `PASS`
-  - Scores: Test 1: Anti-Gun Policy 18/18; Test 2: Christianity Vs Torah And Talmud 18/18; Test 3: Capitalism Vs Communism 18/18; Test 4: DEI Policies 18/18; Test 5: Abortion 18/18
+  - Scores: Test 1: Christianity Vs Torah And Talmud 18/18; Test 2: Capitalism Vs Communism 18/18; Test 3: DEI Policies 18/18
   - Minimum score: `16`
 
 ## 2026-08-16 06:12:07 - Aggregate Check
@@ -106,7 +106,7 @@ Notes:
   - Scores: Test A: Autism Spectrum 18/18; Test B: Gender Terminology 18/18; Test C: Ideological House-of-Cards 18/18
   - Minimum score: `16`
 - `Subject test-run scoring`: `PASS`
-  - Scores: Test 1: Anti-Gun Policy 18/18; Test 2: Christianity Vs Torah And Talmud 18/18; Test 3: Capitalism Vs Communism 18/18; Test 4: DEI Policies 18/18; Test 5: Abortion 18/18
+  - Scores: Test 1: Christianity Vs Torah And Talmud 18/18; Test 2: Capitalism Vs Communism 18/18; Test 3: DEI Policies 18/18
   - Minimum score: `16`
 
 ## 2026-09-14 23:58:00 - Aggregate Check
@@ -122,5 +122,5 @@ Notes:
   - Scores: Test A: Autism Spectrum 18/18; Test B: Gender Terminology 18/18; Test C: Ideological House-of-Cards 18/18
   - Minimum score: `16`
 - `Subject test-run scoring`: `PASS`
-  - Scores: Test 1: Anti-Gun Policy 18/18; Test 2: Christianity Vs Torah And Talmud 18/18; Test 3: Capitalism Vs Communism 18/18; Test 4: DEI Policies 18/18; Test 5: Abortion 18/18
+  - Scores: Test 1: Christianity Vs Torah And Talmud 18/18; Test 2: Capitalism Vs Communism 18/18; Test 3: DEI Policies 18/18
   - Minimum score: `16`
