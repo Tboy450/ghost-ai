@@ -230,7 +230,7 @@ export function applyProposal(root, proposal) {
   return written;
 }
 
-function runTests(root, testGlob) {
+export function runTests(root, testGlob) {
   // Strip Node's own test-runner recursion-guard env vars so a nested `node --test`
   // run (e.g. this cycle's own tests, invoked from inside another `node --test` run)
   // actually executes instead of being silently skipped as a "recursive" run.

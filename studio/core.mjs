@@ -82,6 +82,31 @@ export function buildMessages(history, framework, context) {
   return [{role:'system',content:system}, ...recent];
 }
 
+// A single non-streaming answer from the local model, with a hard deadline.
+// Segment work must never hang: a model that starts rambling, repeats itself, or
+// stalls on one file gets cut off and that segment is skipped, so a long job keeps
+// moving instead of fixating. `limit` also caps output so one segment cannot eat
+// the whole run.
+export async function modelComplete(endpoint, model, messages, {timeoutMs = 120000, profile, signal} = {}) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const onAbort = () => controller.abort();
+  signal?.addEventListener('abort', onAbort, {once: true});
+  let text = '';
+  try {
+    for await (const event of modelStream(endpoint, model, messages, controller.signal, profile || {context:8192,output:2600,keepAlive:'10m'})) {
+      if (event.type === 'token') text += event.text;
+    }
+    return text;
+  } catch (error) {
+    if (controller.signal.aborted && !signal?.aborted) throw Object.assign(new Error('The local model took too long on this segment.'), {timeout: true, partial: text});
+    throw error;
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener('abort', onAbort);
+  }
+}
+
 export async function* modelStream(endpoint, model, messages, signal, profile={context:8192,output:1600,keepAlive:'10m'}) {
   const response = await fetch(`${endpoint}/api/chat`, {
     method:'POST', headers:{'Content-Type':'application/json'}, signal,

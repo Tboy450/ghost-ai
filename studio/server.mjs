@@ -9,6 +9,7 @@ import { rememberConversation, forgetConversation, recall, renderRecall, archive
 import { openProject, listProjects, activeProject, switchProject, closeProject, ensureProjectDirs } from './projects.mjs';
 import * as git from './git.mjs';
 import { listProviders, getFocus, setFocus, runCycle, listHistory, setProviderKey, clearProviderKey, testProvider, PROVIDERS } from './selfimprove.mjs';
+import { relayState, startRelay, clearRelay, submitGuidance, implementSegments, applyRelay } from './relay.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.dirname(HERE);
@@ -42,6 +43,7 @@ function applyProject(nextProject) {
 applyProject(project || openProject(REGISTRY_PATH, path.join(CONFIG_DIR,'workspace'), 'My workspace'));
 const active = new Set();
 let selfImproveBusy = false;
+let relayBusy = false;
 const PROVIDERS_SET = new Set(Object.keys(PROVIDERS));
 const idValid = id => typeof id === 'string' && /^[a-z0-9-]{1,80}$/i.test(id);
 function eventLog(type, detail) { fs.appendFileSync(path.join(dirs.ghost,'activity.jsonl'),JSON.stringify({time:new Date().toISOString(),type,detail})+'\n'); }
@@ -209,6 +211,31 @@ const server=http.createServer(async(req,res)=>{
         eventLog('self_improve_cycle',`${input.provider} · ${report.committed?'committed':'no change'}${report.pushed?' · pushed':''}`);
         return json(res,report.error && !report.committed?200:201,report);
       } finally { selfImproveBusy=false; }
+    }
+    if (req.method==='GET' && url.pathname==='/api/relay') return json(res,200,relayState(dirs));
+    if (req.method==='POST' && url.pathname==='/api/relay') { const input=await body(req); return json(res,201,startRelay(dirs,{codeRoot:ROOT,chat:input.chat,focus:input.focus})); }
+    if (req.method==='DELETE' && url.pathname==='/api/relay') return json(res,200,clearRelay(dirs));
+    if (req.method==='PUT' && url.pathname==='/api/relay/guidance') { const input=await body(req); return json(res,200,submitGuidance(dirs,{codeRoot:ROOT,guidance:input.guidance})); }
+    if (req.method==='POST' && url.pathname==='/api/relay/implement') {
+      // The local model works through the segments one at a time, so progress is
+      // streamed: a run can take minutes and silence would look like a hang.
+      if (relayBusy) throw fail('Ghost is already working through the segments.',409);
+      const input=await body(req);
+      if (!input.model) throw fail('Choose a local model first.');
+      relayBusy=true;
+      res.writeHead(200,{'Content-Type':'application/x-ndjson; charset=utf-8','Cache-Control':'no-store'});
+      try {
+        const state=await implementSegments(dirs,{endpoint:OLLAMA,model:input.model,onProgress:s=>res.write(JSON.stringify({type:'progress',state})+'\n')});
+        res.write(JSON.stringify({type:'done',state})+'\n');
+      } catch(error) { res.write(JSON.stringify({type:'error',message:error.message})+'\n'); }
+      finally { relayBusy=false; res.end(); }
+      return;
+    }
+    if (req.method==='POST' && url.pathname==='/api/relay/apply') {
+      const input=await body(req);
+      const result=applyRelay(dirs,{codeRoot:ROOT,autoPush:input.autoPush===true});
+      eventLog('relay_apply',`${result.committed?'committed':'not committed'} · ${result.applied.length} files`);
+      return json(res,result.committed?201:200,result);
     }
     const assets={'/':'index.html','/app.js':'app.js','/diff.js':'diff.js','/highlight.js':'highlight.js','/styles.css':'styles.css','/ghost.css':'ghost.css'};
     if (req.method==='GET' && assets[url.pathname]) {
