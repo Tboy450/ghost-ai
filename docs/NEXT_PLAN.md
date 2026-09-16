@@ -12,7 +12,7 @@ self-update needed them. What is missing is everything the user touches.
 
 - [x] **Named checkpoints.** Save the working tree under a name you choose, list them
       with times, and return to one. Must survive a restart.
-- [ ] **Readable change review.** What changed, in summary form — files touched, what
+- [x] **Readable change review.** What changed, in summary form — files touched, what
       each change does — not a raw diff wall. The diff stays available underneath.
 - [ ] **Commit and push from the UI.** Show the branch and the exact file list before
       anything happens. Never stage unrelated edits.

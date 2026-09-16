@@ -331,3 +331,111 @@ test('a restore leaves the staging area alone', () => {
     assert.equal(fs.readFileSync(path.join(repo, 'a.md'), 'utf8'), 'work in progress\n');
   } finally { fs.rmSync(repo, {recursive: true, force: true}); }
 });
+
+// The whole point of the review is that you can understand what changed without
+// reading a diff, so these assert on the words it produces, not on its shape.
+test('the review says what changed in each file, in words', () => {
+  const repo = makeRepo();
+  try {
+    fs.writeFileSync(path.join(repo, 'tools.mjs'), 'export function alpha() {\n  return 1;\n}\n\nexport function beta() {\n  return 2;\n}\n');
+    spawnSync('git', ['add', '-A'], {cwd: repo});
+    spawnSync('git', ['commit', '-q', '-m', 'tools'], {cwd: repo});
+
+    // one function gained a line, one was removed, one is brand new
+    fs.writeFileSync(path.join(repo, 'tools.mjs'), 'export function alpha() {\n  const extra = 0;\n  return 1 + extra;\n}\n\nexport function gamma() {\n  return 3;\n}\n');
+    fs.writeFileSync(path.join(repo, 'notes.md'), '# Notes\n\nsomething new\n');
+
+    const review = git.reviewChanges(repo);
+    assert.equal(review.clean, false);
+
+    const tools = review.files.find(f => f.path === 'tools.mjs');
+    assert.equal(tools.change, 'edited');
+    assert.ok(tools.notes.includes('adds gamma'), `expected "adds gamma" in ${JSON.stringify(tools.notes)}`);
+    assert.ok(tools.notes.includes('removes beta'), `expected "removes beta" in ${JSON.stringify(tools.notes)}`);
+    assert.ok(tools.lines.added > 0 && tools.lines.removed > 0);
+
+    const notes = review.files.find(f => f.path === 'notes.md');
+    assert.equal(notes.change, 'added');
+    assert.equal(notes.lines.added, 3, 'a new file counts all of its lines as added');
+    assert.match(notes.summary, /New file, 3 lines/);
+
+    assert.match(review.headline, /1 file edited/);
+    assert.match(review.headline, /1 file added/);
+  } finally { fs.rmSync(repo, {recursive: true, force: true}); }
+});
+
+test('the review reports a deleted file as deleted, not as an empty edit', () => {
+  const repo = makeRepo();
+  try {
+    fs.rmSync(path.join(repo, 'a.md'));
+    const review = git.reviewChanges(repo);
+    const gone = review.files.find(f => f.path === 'a.md');
+    assert.equal(gone.change, 'deleted');
+    assert.equal(gone.summary, 'Deleted.');
+  } finally { fs.rmSync(repo, {recursive: true, force: true}); }
+});
+
+test('the review is silent when nothing has changed', () => {
+  const repo = makeRepo();
+  try {
+    const review = git.reviewChanges(repo);
+    assert.equal(review.clean, true);
+    assert.equal(review.files.length, 0);
+    assert.match(review.headline, /Nothing has changed/);
+  } finally { fs.rmSync(repo, {recursive: true, force: true}); }
+});
+
+// `git diff HEAD` says nothing at all about a file that has never been committed, so
+// asking to see a brand-new file used to show an empty panel with no explanation.
+test('the diff of a brand-new file shows its contents', () => {
+  const repo = makeRepo();
+  try {
+    fs.writeFileSync(path.join(repo, 'fresh.mjs'), 'export const hello = 1;\n');
+    const patch = git.diff(repo, 'fresh.mjs');
+    assert.ok(patch.includes('+export const hello = 1;'), `expected the new line in the patch, got: ${patch}`);
+    assert.ok(patch.includes('fresh.mjs'), 'the patch must name the real file, not a temporary one');
+    assert.ok(!patch.includes(os.tmpdir().replace(/\\/g, '/').split('/').pop() + '/ghost-empty'), 'the temporary file must not leak into the patch');
+  } finally { fs.rmSync(repo, {recursive: true, force: true}); }
+});
+
+// Found live, not by the suite: `git status --porcelain` prints repo-root-relative
+// paths while a `git diff` pathspec is folder-relative. Ghost's project folder is not
+// always the repository root, so every description came back empty and the review
+// degraded to bare line counts.
+test('the review still describes changes when the project folder is below the repo root', () => {
+  const repo = makeRepo();
+  try {
+    const inner = path.join(repo, 'workspace');
+    fs.mkdirSync(inner);
+    fs.writeFileSync(path.join(inner, 'keep.md'), 'keeps the folder in git\n');
+    fs.writeFileSync(path.join(repo, 'tools.mjs'), 'export function alpha() {\n  return 1;\n}\n');
+    spawnSync('git', ['add', '-A'], {cwd: repo});
+    spawnSync('git', ['commit', '-q', '-m', 'with a subfolder'], {cwd: repo});
+
+    fs.writeFileSync(path.join(repo, 'tools.mjs'), 'export function alpha() {\n  return 1;\n}\n\nexport function beta() {\n  return 2;\n}\n');
+
+    // reviewed from the subfolder, exactly as the server does
+    const review = git.reviewChanges(inner);
+    const tools = review.files.find(f => f.path === 'tools.mjs');
+    assert.ok(tools, `expected tools.mjs in ${JSON.stringify(review.files.map(f => f.path))}`);
+    assert.ok(tools.notes.includes('adds beta'), `expected a description, got ${JSON.stringify(tools.notes)}`);
+    assert.ok(git.diff(inner, 'tools.mjs').includes('+export function beta'), 'the diff must find a file outside the project folder');
+  } finally { fs.rmSync(repo, {recursive: true, force: true}); }
+});
+
+// Live, the review said "changes test" for an edited test file and "changes $" for the
+// UI - the names of the harness around the change, not the change.
+test('the review leaves out harness names that say nothing about the change', () => {
+  const repo = makeRepo();
+  try {
+    fs.writeFileSync(path.join(repo, 'suite.test.mjs'), "test('one', () => {\n  assert.ok(true);\n});\n");
+    spawnSync('git', ['add', '-A'], {cwd: repo});
+    spawnSync('git', ['commit', '-q', '-m', 'a suite'], {cwd: repo});
+    fs.writeFileSync(path.join(repo, 'suite.test.mjs'), "test('one', () => {\n  assert.ok(true);\n  assert.equal(1, 1);\n});\n");
+
+    const review = git.reviewChanges(repo);
+    const suite = review.files.find(f => f.path === 'suite.test.mjs');
+    assert.deepEqual(suite.notes, [], `expected no harness names, got ${JSON.stringify(suite.notes)}`);
+    assert.match(suite.summary, /1 line added/);
+  } finally { fs.rmSync(repo, {recursive: true, force: true}); }
+});

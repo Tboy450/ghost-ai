@@ -42,11 +42,174 @@ export function status(root) {
 
 export function diff(root, file) {
   ensureRepo(root);
+  // `git status --porcelain` always prints paths relative to the repository root, but a
+  // `git diff` pathspec is resolved relative to the current folder. When the project
+  // folder is not the repository root those two disagree and the diff silently comes
+  // back empty, so pathspecs here are pinned to the top of the repository.
   const args = ['diff', '--no-color', 'HEAD', '--'];
-  if (file) args.push(file);
+  if (file) args.push(`:(top,literal)${file}`);
   const result = run(root, args);
   if (result.status !== 0 && result.status !== 1) throw fail(result.stderr || 'git diff failed.', 500);
+  // A file that has never been committed produces no output from `git diff HEAD`, so
+  // asking to see a brand-new file would show an empty panel with no explanation.
+  // Comparing it against an empty file gives the same patch format as everything else.
+  if (file && !result.stdout.trim() && isUntracked(root, file)) return newFileDiff(root, file);
   return result.stdout;
+}
+
+function isUntracked(root, file) {
+  const listed = run(root, ['ls-files', '--error-unmatch', '--', `:(top,literal)${file}`]);
+  if (listed.status === 0) return false;
+  return fs.existsSync(path.join(repoRoot(root), file));
+}
+
+function newFileDiff(root, file) {
+  const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'ghost-empty-'));
+  const blank = path.join(empty, 'empty');
+  try {
+    fs.writeFileSync(blank, '');
+    const result = run(root, ['diff', '--no-color', '--no-index', '--', blank, path.join(repoRoot(root), file)]);
+    // --no-index names the temporary file in the header; show the real path instead.
+    return result.stdout
+      .replace(/^diff --git .*$/m, `diff --git a/${file} b/${file}`)
+      .replace(/^--- .*$/m, '--- /dev/null')
+      .replace(/^\+\+\+ .*$/m, `+++ b/${file}`);
+  } finally { fs.rmSync(empty, {recursive: true, force: true}); }
+}
+
+// Words for what a porcelain status code means, so the UI never shows raw codes.
+const CHANGE_WORDS = {'??': 'added', 'A': 'added', 'D': 'deleted', 'R': 'renamed', 'C': 'copied', 'M': 'edited', 'U': 'conflicted'};
+
+function changeWord(code) {
+  const letters = code.replace(/\s/g, '');
+  for (const key of ['U', 'R', 'C', 'D', 'A', 'M']) if (letters.includes(key)) return CHANGE_WORDS[key];
+  return CHANGE_WORDS[letters] || 'edited';
+}
+
+// Names of things defined in a line, across the languages Ghost is likely to meet.
+const DEFINITIONS = [
+  /^\s*(?:export\s+)?(?:default\s+)?(?:async\s+)?function\s*\*?\s*([A-Za-z_$][\w$]*)/,
+  /^\s*(?:export\s+)?(?:abstract\s+)?class\s+([A-Za-z_$][\w$]*)/,
+  /^\s*(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?(?:function\b|\([^)]*\)\s*=>|[A-Za-z_$][\w$]*\s*=>)/,
+  /^\s*(?:async\s+)?def\s+([A-Za-z_$][\w$]*)/,
+  /^\s*(?:public|private|protected|static|\s)*[A-Za-z_$][\w$<>,\[\]]*\s+([A-Za-z_$][\w$]*)\s*\([^)]*\)\s*\{/,
+];
+
+// Names that are almost always the surrounding harness rather than the thing that
+// changed. Reporting "changes test" for an edited test file is noise, not a summary.
+const UNINFORMATIVE = new Set(['if', 'for', 'while', 'switch', 'catch', 'do', 'else', 'return', 'typeof', 'new', 'test', 'it', 'describe', 'expect', 'assert', 'console', 'require', 'import']);
+
+function usefulName(name) {
+  return Boolean(name) && name.length > 1 && !UNINFORMATIVE.has(name);
+}
+
+function definedName(line) {
+  for (const pattern of DEFINITIONS) {
+    const found = pattern.exec(line);
+    if (found && usefulName(found[1])) return found[1];
+  }
+  return null;
+}
+
+// Turn a patch into a few plain sentences about what it does, rather than a wall of
+// +/- lines. Names that appear only on added lines were introduced; names only on
+// removed lines went away; anything else was changed in place.
+function describePatch(patch) {
+  const added = new Set(), removed = new Set(), touched = new Set();
+  for (const line of patch.split('\n')) {
+    if (line.startsWith('@@')) {
+      const context = line.slice(line.indexOf('@@', 2) + 2).trim();
+      const name = definedName(context) || /([A-Za-z_$][\w$]*)\s*\(/.exec(context)?.[1];
+      if (usefulName(name)) touched.add(name);
+    } else if (line.startsWith('+') && !line.startsWith('+++')) {
+      const name = definedName(line.slice(1));
+      if (name) added.add(name);
+    } else if (line.startsWith('-') && !line.startsWith('---')) {
+      const name = definedName(line.slice(1));
+      if (name) removed.add(name);
+    }
+  }
+  const notes = [];
+  for (const name of added) notes.push(removed.has(name) ? `changes ${name}` : `adds ${name}`);
+  for (const name of removed) if (!added.has(name)) notes.push(`removes ${name}`);
+  for (const name of touched) if (!added.has(name) && !removed.has(name)) notes.push(`changes ${name}`);
+  return notes;
+}
+
+function countLines(file) {
+  try {
+    const text = fs.readFileSync(file, 'utf8');
+    if (!text) return 0;
+    return text.split('\n').length - (text.endsWith('\n') ? 1 : 0);
+  } catch { return 0; }
+}
+
+const REVIEW_DETAIL_LIMIT = 60;
+
+// A readable summary of everything that has changed since the last commit: which files,
+// what kind of change, how big it is, and what it does. The raw diff stays available
+// per file through `diff()`; this is what you read first.
+export function reviewChanges(root) {
+  ensureRepo(root);
+  const state = status(root);
+  if (state.clean) return {branch: state.branch, clean: true, files: [], headline: 'Nothing has changed since the last commit.', totals: {files: 0, added: 0, removed: 0}};
+
+  const sizes = new Map();
+  const numstat = run(root, ['diff', '--numstat', '-z', 'HEAD']);
+  if (numstat.status === 0) {
+    const fields = numstat.stdout.split('\0');
+    for (let i = 0; i < fields.length; i++) {
+      const entry = /^(\d+|-)\t(\d+|-)\t(.*)$/.exec(fields[i]);
+      if (!entry) continue;
+      // A rename is stored as an empty path followed by the old and new names.
+      let file = entry[3];
+      if (!file) { i += 2; file = fields[i]; }
+      sizes.set(file, {added: entry[1] === '-' ? null : Number(entry[1]), removed: entry[2] === '-' ? null : Number(entry[2])});
+    }
+  }
+
+  const top = repoRoot(root);
+  let added = 0, removed = 0;
+  const files = state.files.slice(0, REVIEW_DETAIL_LIMIT).map(file => {
+    const change = changeWord(file.status);
+    const size = sizes.get(file.path);
+    const binary = size ? size.added === null : false;
+    let lines = size ? {added: size.added || 0, removed: size.removed || 0} : {added: 0, removed: 0};
+    if (!size && change === 'added') lines = {added: countLines(path.join(top, file.path)), removed: 0};
+
+    let notes = [];
+    if (!binary) {
+      try { notes = describePatch(diff(root, file.path)); } catch { notes = []; }
+    }
+    added += lines.added; removed += lines.removed;
+    return {
+      path: file.path,
+      change,
+      staged: file.status[0] !== ' ' && file.status !== '??',
+      binary,
+      lines,
+      notes: notes.slice(0, 6),
+      moreNotes: Math.max(0, notes.length - 6),
+      summary: summarise(change, lines, notes, binary),
+    };
+  });
+
+  const counts = {};
+  for (const file of files) counts[file.change] = (counts[file.change] || 0) + 1;
+  const parts = Object.entries(counts).map(([word, count]) => `${count} file${count === 1 ? '' : 's'} ${word}`);
+  const hidden = state.files.length - files.length;
+  const headline = `${parts.join(', ')}${hidden > 0 ? `, and ${hidden} more not shown` : ''} — ${added} line${added === 1 ? '' : 's'} added, ${removed} removed.`;
+  return {branch: state.branch, clean: false, files, headline, totals: {files: state.files.length, added, removed}};
+}
+
+function summarise(change, lines, notes, binary) {
+  if (binary) return `Binary file ${change}.`;
+  if (change === 'deleted') return 'Deleted.';
+  const size = `${lines.added} line${lines.added === 1 ? '' : 's'} added, ${lines.removed} removed`;
+  if (!notes.length) return change === 'added' ? `New file, ${lines.added} line${lines.added === 1 ? '' : 's'}.` : `${size}.`;
+  const listed = notes.slice(0, 3).join(', ');
+  const rest = notes.length > 3 ? `, and ${notes.length - 3} more` : '';
+  return `${listed}${rest} — ${size}.`;
 }
 
 export function log(root, limit = 25) {
