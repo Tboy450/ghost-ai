@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { readFile, saveFile, safeFile, listFiles, searchProject, modelStream } from '../core.mjs';
+import { readFile, saveFile, safeFile, listFiles, searchProject, modelStream, BASE_PROMPT, buildMessages } from '../core.mjs';
 import { packContext, packAdaptive, itemize, estimateTokens, relevantFile, PROFILES, chipProfileFor } from '../memory.mjs';
 import { CHIP_PROFILES } from '../ram.mjs';
 
@@ -182,4 +182,22 @@ test('model streaming stops when its signal is aborted',async()=>{
   } finally {
     await new Promise(resolve=>server.close(resolve));
   }
+});
+
+// Asked "can you run a self update from here?" Ghost replied that it cannot self-update
+// and has "no access to external systems, repositories, or update mechanisms". Every part
+// of that is false about the application it lives in - it has a relay, a self-improve
+// route, git, and a guarded apply. The prompt had told it only what the chat box lacks,
+// so it generalised that into denying the whole application.
+test('the system prompt tells the model what the application can actually do', () => {
+  assert.match(BASE_PROMPT, /Relay/, 'the no-key self-improvement route is named');
+  assert.match(BASE_PROMPT, /test suite/, 'the guard that protects a rewrite is named');
+  assert.match(BASE_PROMPT, /Never state that Ghost lacks self-update/,
+    'the exact wrong answer is ruled out explicitly');
+  assert.match(BASE_PROMPT, /cannot act from this chat box, but Ghost can/,
+    'it must still separate what it can do here from what the application can do');
+  assert.doesNotMatch(BASE_PROMPT, /There are no shell or file-edit tools in this chat\./,
+    'the old blanket wording is what caused the denial');
+  const system = buildMessages([{role: 'user', content: 'hi'}], '', null)[0].content;
+  assert.match(system, /Self-improvement/, 'the capabilities must survive into the real message');
 });
