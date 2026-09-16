@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { listFiles, readFile, saveFile, searchProject, modelStream, BASE_PROMPT } from './core.mjs';
 import { packContext, packAdaptive, PROFILES } from './memory.mjs';
+import { rememberConversation, forgetConversation, recall, renderRecall, archiveStats, expandPocket } from './archive.mjs';
 import { openProject, listProjects, activeProject, switchProject, closeProject, ensureProjectDirs } from './projects.mjs';
 import * as git from './git.mjs';
 import { listProviders, getFocus, setFocus, runCycle, listHistory, setProviderKey, clearProviderKey, testProvider, PROVIDERS } from './selfimprove.mjs';
@@ -36,7 +37,7 @@ function applyProject(nextProject) {
   ROOTS.workspace = {label:project.name,path:project.path};
   const entries = fs.readdirSync(project.path).filter(n=>!n.startsWith('.'));
   const welcomeFile = path.join(project.path,'Getting started.md');
-  if (!entries.length && !fs.existsSync(welcomeFile)) fs.writeFileSync(welcomeFile, '# Welcome to Ghost\n\nA local space to think, build, and test.\n\n- Start a conversation in the center.\n- Browse the recovered source or your framework on the right.\n- Attach a file to ask the assistant about it.\n- Use Compare to run the same prompt with and without the framework.\n\nThe assistant suggests edits; Save writes the editor contents and creates a backup.\n');
+  if (!entries.length && !fs.existsSync(welcomeFile)) fs.writeFileSync(welcomeFile, '# Welcome to Ghost\n\nA local space to think, build, and test.\n\n- Start a conversation in the center.\n- Browse the recovered source or your framework on the right.\n- Attach a file to ask the assistant about it.\n- Ghost remembers decisions across conversations in this project and recalls them when they matter.\n\nThe assistant suggests edits; Save writes the editor contents and creates a backup.\n');
 }
 applyProject(project || openProject(REGISTRY_PATH, path.join(CONFIG_DIR,'workspace'), 'My workspace'));
 const active = new Set();
@@ -90,8 +91,17 @@ async function chat(req,res,input) {
   let content='',metrics={};
   try {
     const profile=PROFILES[input.profile]?input.profile:'auto';
-    const system=BASE_PROMPT+(input.framework?'\n\nReasoning framework:\n'+frameworkPrompt():'');
+    let system=BASE_PROMPT+(input.framework?'\n\nReasoning framework:\n'+frameworkPrompt():'');
+    // Long-term recall runs as its own level on top of the planner. It only adds notes the
+    // live transcript cannot supply, and any failure here must never cost the user a turn.
+    let recalled=[];
+    try {
+      recalled=recall(dirs,input.prompt,{limit:6,excludeConversation:session.id});
+      const block=renderRecall(dirs,recalled,{budget:700});
+      if (block) system+='\n\n'+block;
+    } catch { recalled=[]; }
     const packed = profile==='auto' ? packAdaptive(session.messages,system,context,session.pinned || []) : packContext(session.messages,system,context,profile,session.pinned || []);
+    packed.stats.recalled=recalled.map(pocket=>({id:pocket.id,conversation:pocket.conversation,title:pocket.title,kind:pocket.kind,digest:pocket.digest.slice(0,180)}));
     session.lastContext=packed.stats;session.profile=input.profile==='auto'?'auto':packed.stats.profile;saveSession(session);
     stream.send({type:'context',stats:packed.stats});
     for await (const event of modelStream(OLLAMA,input.model,packed.messages,stream.controller.signal,PROFILES[packed.stats.profile])) {
@@ -102,6 +112,8 @@ async function chat(req,res,input) {
     if (!content.trim()) throw new Error('The model returned no answer. Try a shorter request.');
     session.messages.push({role:'assistant',content,time:new Date().toISOString(),model:input.model,framework:Boolean(input.framework),...metrics});
     saveSession(session); eventLog('chat',`${session.title} · ${input.model}`);
+    // Index the finished exchange so later conversations can recall it.
+    try { rememberConversation(dirs,session.id,session.title,session.messages); } catch { /* recall is optional */ }
     stream.send({type:'done',session});
   } catch (error) {
     const stopped=stream.controller.signal.aborted;
@@ -152,6 +164,19 @@ const server=http.createServer(async(req,res)=>{
     }
     if (req.method==='POST' && url.pathname==='/api/sessions') { const s={id:randomUUID(),title:'New conversation',messages:[],framework:true,model:'qwen3:4b-instruct'};saveSession(s);return json(res,201,s); }
     if (req.method==='GET' && url.pathname==='/api/session') { const id=url.searchParams.get('id');return json(res,200,{...loadSession(id),running:active.has(id)}); }
+    if (req.method==='GET' && url.pathname==='/api/recall') {
+      const query=url.searchParams.get('q') || '';
+      const exclude=url.searchParams.get('exclude') || null;
+      const pocketId=url.searchParams.get('pocket');
+      if (pocketId) { const pocket=expandPocket(dirs,pocketId); if(!pocket) throw fail('That note is no longer stored.',404); return json(res,200,pocket); }
+      return json(res,200,{...archiveStats(dirs),results:query.trim()?recall(dirs,query,{limit:10,excludeConversation:exclude}):[]});
+    }
+    if (req.method==='DELETE' && url.pathname==='/api/recall') {
+      const input=await body(req);
+      if (!idValid(input.conversation)) throw fail('Invalid conversation.');
+      forgetConversation(dirs,input.conversation);
+      return json(res,200,archiveStats(dirs));
+    }
     if (req.method==='PUT' && url.pathname==='/api/memory') {
       const input=await body(req);const session=loadSession(input.sessionId);
       if (active.has(session.id)) throw fail('Wait for the current response before editing memory.',409);

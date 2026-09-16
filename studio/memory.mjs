@@ -32,7 +32,7 @@ const SYNONYM_GROUPS = [
 ];
 const SYNONYMS = new Map();
 for (const group of SYNONYM_GROUPS) for (const word of group) SYNONYMS.set(word, group);
-const terms = text => {
+export const terms = text => {
   const base=(text.toLowerCase().match(/[a-z0-9_]{3,}/g) || []).filter(t=>!STOP.has(t)).map(stem);
   const expanded=new Set(base);
   for (const term of base) { const group=SYNONYMS.get(term); if (group) for (const synonym of group) expanded.add(synonym); }
