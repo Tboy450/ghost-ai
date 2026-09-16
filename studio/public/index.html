@@ -65,7 +65,11 @@
           <div class="git-toolbar"><button id="git-refresh" class="secondary-button">Refresh</button><span id="git-branch" class="memory-help"></span></div>
           <div id="git-status-list" class="git-status-list"></div>
           <div id="git-diff-view" class="diff-view"></div>
-          <div class="git-commit-row"><input id="git-commit-message" placeholder="Describe this checkpoint…" aria-label="Commit message"><button id="git-commit" class="primary-button">Commit</button><button id="git-push" class="secondary-button">Push</button></div>
+          <div class="git-commit-row"><input id="git-commit-message" placeholder="Describe this commit…" aria-label="Commit message"><button id="git-commit" class="primary-button">Commit</button><button id="git-push" class="secondary-button">Push</button></div>
+          <h3 class="memory-title">Checkpoints</h3>
+          <p class="memory-help">A checkpoint saves everything in the folder right now — including edits you haven't committed — so you can try something risky and come straight back. Ghost's own <code>.ghost/</code> folder is never included.</p>
+          <div class="git-commit-row"><input id="checkpoint-name" placeholder="Name this checkpoint…" aria-label="Checkpoint name"><button id="checkpoint-save" class="primary-button">Save checkpoint</button></div>
+          <div id="checkpoint-list" class="git-log"></div>
           <h3 class="memory-title">History</h3>
           <div id="git-log" class="git-log"></div>
         </div>

@@ -10,14 +10,15 @@ Tick these off as they land. Each needs a dated row in
 `studio/git.mjs` already does worktrees, branches, commits, pushes and diffing, because
 self-update needed them. What is missing is everything the user touches.
 
-- [ ] **Named checkpoints.** Save the working tree under a name you choose, list them
+- [x] **Named checkpoints.** Save the working tree under a name you choose, list them
       with times, and return to one. Must survive a restart.
 - [ ] **Readable change review.** What changed, in summary form — files touched, what
       each change does — not a raw diff wall. The diff stays available underneath.
 - [ ] **Commit and push from the UI.** Show the branch and the exact file list before
       anything happens. Never stage unrelated edits.
-- [ ] **Restore.** Return to a checkpoint and confirm the tree matches, with a clear
-      warning about what will be discarded.
+- [x] **Restore.** Return to a checkpoint and confirm the tree matches, with a clear
+      warning about what will be discarded. Ghost saves a safety checkpoint of the
+      current state first, so any restore can itself be undone.
 - [ ] **Failure cases tested live.** No remote configured, rejected push, dirty tree,
       conflict on restore. Each must give a readable message, not raw git output.
 

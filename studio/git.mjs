@@ -3,9 +3,13 @@
 // no shell interpolation is used (spawnSync argv arrays only).
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
-function run(root, args) {
-  const result = spawnSync('git', args, {cwd: root, encoding: 'utf8', maxBuffer: 20 * 1024 * 1024});
+function run(root, args, env) {
+  const options = {cwd: root, encoding: 'utf8', maxBuffer: 20 * 1024 * 1024};
+  if (env) options.env = {...process.env, ...env};
+  const result = spawnSync('git', args, options);
   if (result.error) throw Object.assign(new Error(`git not available: ${result.error.message}`), {status: 500});
   return result;
 }
@@ -131,6 +135,178 @@ export function removeWorktree(root, worktreeDir) {
 export function stageIntentToAdd(root) {
   ensureRepo(root);
   run(root, ['add', '-A', '-N']);
+}
+
+// --- Checkpoints -----------------------------------------------------------------
+// A checkpoint is a named snapshot of the working tree you can come back to, including
+// uncommitted edits. It is NOT a commit: `git stash create` writes a commit object and
+// leaves the working tree untouched, so taking one never interrupts what you are doing.
+// A ref under refs/ghost/checkpoints/ keeps that object from being garbage-collected,
+// and the names and times live in .ghost/checkpoints.json.
+const CHECKPOINT_FILE = 'checkpoints.json';
+const CHECKPOINT_REF = 'refs/ghost/checkpoints';
+// Ghost's own folder is deliberately outside every checkpoint. It holds the checkpoint
+// store itself, so including it would mean restoring an old checkpoint deletes every
+// checkpoint taken since - destroying the escape route on the way out.
+// The `top` magic anchors these at the repository root: a snapshot covers the whole
+// repository, so a pathspec relative to the current folder would compare a different
+// (and possibly empty) set of files than the one that was saved.
+const CHECKPOINT_SCOPE = [':/', ':(top,exclude).ghost', ':(top,exclude).ghost/**'];
+// A checkpoint must return the file exactly as it was, byte for byte. Git's line-ending
+// conversion is on by default on Windows, which would rewrite CRLF to LF on the way in
+// and back again on the way out - silently changing files the user never edited.
+const VERBATIM = ['-c', 'core.autocrlf=false', '-c', 'core.eol=lf'];
+
+function checkpointStore(dirs) { return path.join(dirs.ghost, CHECKPOINT_FILE); }
+
+// A project folder can sit below the repository root (Ghost's own workspace does), and
+// checkpoints are repository-wide, so paths coming back from git are relative to here.
+function repoRoot(root) {
+  const found = run(root, ['rev-parse', '--show-toplevel']);
+  return found.status === 0 && found.stdout.trim() ? found.stdout.trim() : root;
+}
+
+function readCheckpoints(dirs) {
+  try { return JSON.parse(fs.readFileSync(checkpointStore(dirs), 'utf8')); }
+  catch { return []; }
+}
+
+function writeCheckpoints(dirs, list) {
+  fs.mkdirSync(dirs.ghost, {recursive: true});
+  fs.writeFileSync(checkpointStore(dirs), JSON.stringify(list, null, 2));
+  return list;
+}
+
+// Writes the current working tree into git's object store using a throwaway index, so
+// the real index is never touched and files you have not staged (or never committed)
+// are still captured. `git stash create` cannot be used here: it refuses to run when
+// any intent-to-add entry is present, which is exactly the brand-new-file case.
+function writeWorktreeTree(root) {
+  const tempIndex = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'ghost-cp-')), 'index');
+  const env = {GIT_INDEX_FILE: tempIndex};
+  try {
+    // No pathspec: naming a path that .gitignore covers is a fatal error for `git add`,
+    // and .ghost/ is gitignored in every real project - so it cannot be excluded here.
+    const added = run(root, [...VERBATIM, 'add', '-A'], env);
+    if (added.status !== 0) throw fail(added.stderr || 'Could not read the working tree.', 500);
+    // Dropped from the index instead. `git rm --cached` does no ignore checking, so it
+    // can name the path that `git add` refused to.
+    run(root, ['rm', '--cached', '-r', '-q', '--ignore-unmatch', '--', '.ghost'], env);
+    const tree = run(root, ['write-tree'], env);
+    if (tree.status !== 0) throw fail(tree.stderr || 'Could not snapshot the working tree.', 500);
+    return tree.stdout.trim();
+  } finally {
+    fs.rmSync(path.dirname(tempIndex), {recursive: true, force: true});
+  }
+}
+
+function snapshotTree(root, message) {
+  const tree = writeWorktreeTree(root);
+  const args = ['commit-tree', tree, '-m', message];
+  const head = run(root, ['rev-parse', '--verify', 'HEAD']);
+  if (head.status === 0) args.push('-p', head.stdout.trim());
+  const made = run(root, args, {
+    GIT_AUTHOR_NAME: 'Ghost', GIT_AUTHOR_EMAIL: 'ghost@local',
+    GIT_COMMITTER_NAME: 'Ghost', GIT_COMMITTER_EMAIL: 'ghost@local',
+  });
+  if (made.status !== 0) throw fail(made.stderr || 'Could not save the snapshot.', 500);
+  return made.stdout.trim();
+}
+
+export function createCheckpoint(root, dirs, name) {
+  ensureRepo(root);
+  if (typeof name !== 'string' || !name.trim()) throw fail('Give the checkpoint a name.');
+  const label = name.trim().slice(0, 120);
+
+  const hash = snapshotTree(root, `Ghost checkpoint: ${label}`);
+  const id = `${Date.now().toString(36)}-${hash.slice(0, 8)}`;
+  const ref = `${CHECKPOINT_REF}/${id}`;
+  const kept = run(root, ['update-ref', ref, hash]);
+  if (kept.status !== 0) throw fail(kept.stderr || 'Could not save the checkpoint.', 500);
+
+  const entry = {
+    id, name: label, hash, ref,
+    time: new Date().toISOString(),
+    branch: currentBranch(root),
+    files: status(root).files.length,
+  };
+  writeCheckpoints(dirs, [entry, ...readCheckpoints(dirs)].slice(0, 100));
+  return entry;
+}
+
+// Only lists checkpoints whose object is still present, so a pruned or hand-deleted
+// ref cannot leave a dead entry that fails the moment you try to restore it.
+export function listCheckpoints(root, dirs) {
+  ensureRepo(root);
+  const alive = readCheckpoints(dirs).filter(entry =>
+    run(root, ['cat-file', '-e', `${entry.hash}^{commit}`]).status === 0);
+  if (alive.length !== readCheckpoints(dirs).length) writeCheckpoints(dirs, alive);
+  return alive;
+}
+
+function findCheckpoint(root, dirs, id) {
+  const found = listCheckpoints(root, dirs).find(entry => entry.id === id);
+  if (!found) throw fail('That checkpoint no longer exists.', 404);
+  return found;
+}
+
+// What restoring would actually do, so it can be shown before anything is touched.
+// The comparison is tree-to-tree rather than against the working copy, because a plain
+// `git diff <commit>` cannot see files that were never added to git - and a brand-new
+// file is precisely what a restore needs to warn you it will delete.
+export function previewRestore(root, dirs, id) {
+  const entry = findCheckpoint(root, dirs, id);
+  const result = run(root, ['diff', '--name-status', entry.hash, writeWorktreeTree(root), '--', ...CHECKPOINT_SCOPE]);
+  if (result.status !== 0 && result.status !== 1) throw fail(result.stderr || 'Could not compare that checkpoint.', 500);
+  const changes = result.stdout.split('\n').filter(Boolean).map(line => {
+    const [code, ...rest] = line.split('\t');
+    const file = rest.join('\t');
+    // The diff runs checkpoint -> now, so "added since" means restoring removes it.
+    if (code.startsWith('A')) return {path: file, action: 'remove', detail: 'added since the checkpoint'};
+    if (code.startsWith('D')) return {path: file, action: 'restore', detail: 'deleted since the checkpoint'};
+    return {path: file, action: 'overwrite', detail: 'changed since the checkpoint'};
+  });
+  return {checkpoint: entry, changes, clean: changes.length === 0};
+}
+
+export function restoreCheckpoint(root, dirs, id) {
+  const {checkpoint, changes} = previewRestore(root, dirs, id);
+
+  // Restoring discards current work, so snapshot it first. Without this the one
+  // operation that exists to undo a mistake is itself impossible to undo.
+  const safety = createCheckpoint(root, dirs, `Before restoring "${checkpoint.name}"`);
+
+  // Restore only the files the preview named. `git checkout <commit> -- :/` rewrites
+  // every file in the tree, including ones that never changed - which is slower, and
+  // fails outright if any unrelated file happens to be locked by another program.
+  // `git restore --worktree` is used rather than `git checkout`, because checkout also
+  // stages what it writes, which would silently add the restored files to work the user
+  // had already staged for a commit.
+  const top = repoRoot(root);
+  const toWrite = changes.filter(c => c.action !== 'remove').map(c => `:(top,literal)${c.path}`);
+  for (let i = 0; i < toWrite.length; i += 200) {
+    const batch = toWrite.slice(i, i + 200);
+    const applied = run(root, [...VERBATIM, 'restore', '--source', checkpoint.hash, '--worktree', '--', ...batch]);
+    if (applied.status !== 0) throw fail(applied.stderr || 'Could not restore that checkpoint.', 500);
+  }
+
+  // Checkout writes files but never removes ones the checkpoint lacks, so anything
+  // added since would survive and quietly corrupt the restored state. Diff paths are
+  // repository-relative, so they resolve against the repository root, not the project
+  // folder, which may sit below it.
+  const removed = [];
+  for (const change of changes.filter(c => c.action === 'remove')) {
+    const full = path.join(top, change.path);
+    if (fs.existsSync(full)) { fs.rmSync(full, {force: true}); removed.push(change.path); }
+  }
+  return {checkpoint, safety, restored: changes.length, removed};
+}
+
+export function deleteCheckpoint(root, dirs, id) {
+  const entry = findCheckpoint(root, dirs, id);
+  run(root, ['update-ref', '-d', entry.ref]);
+  writeCheckpoints(dirs, readCheckpoints(dirs).filter(item => item.id !== id));
+  return {id, name: entry.name};
 }
 
 // Throws away every uncommitted change in a worktree, returning it to its last commit.
