@@ -93,13 +93,31 @@ export function fileAt(root, hash, file) {
 // edits. Always pair with removeWorktree() in a `finally` block.
 export function addWorktree(root, worktreeDir, branch) {
   ensureRepo(root);
-  const result = run(root, ['worktree', 'add', '-B', branch, worktreeDir, 'HEAD']);
+  // If a previous run was killed part way through, git still has its temp directory
+  // registered against this branch even though the directory is long gone. Every later
+  // run then dies on "branch is already used by worktree", permanently, until someone
+  // knows to run `git worktree prune` by hand. Clear the stale registration first.
+  run(root, ['worktree', 'prune']);
+  let result = run(root, ['worktree', 'add', '-B', branch, worktreeDir, 'HEAD']);
+  if (result.status !== 0 && /already used by worktree/i.test(result.stderr || '')) {
+    // Still held, so the recorded directory survived but is not ours to keep. Detach it
+    // and retry once; a worktree for an automated branch is disposable by design.
+    const stale = (result.stderr.match(/worktree at '([^']+)'/) || [])[1];
+    if (stale) {
+      run(root, ['worktree', 'remove', stale, '--force']);
+      run(root, ['worktree', 'prune']);
+      result = run(root, ['worktree', 'add', '-B', branch, worktreeDir, 'HEAD']);
+    }
+  }
   if (result.status !== 0) throw fail(result.stderr || 'Could not create a worktree for the update branch.', 500);
   return branch;
 }
 
 export function removeWorktree(root, worktreeDir) {
   run(root, ['worktree', 'remove', worktreeDir, '--force']);
+  // Prune as well, so a directory that was already deleted underneath git does not stay
+  // registered and block the next run.
+  run(root, ['worktree', 'prune']);
 }
 
 // Records brand-new files as "intent to add" so `git diff` includes them. Without this

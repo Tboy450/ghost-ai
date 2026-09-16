@@ -124,7 +124,7 @@ test('testProvider surfaces a provider rejection instead of reporting success', 
   t.after(() => { server.close(); fs.rmSync(ghost, {recursive: true, force: true}); });
   const dirs = dirsFor(ghost);
   setProviderKey(dirs, 'grok', 'sk-wrong');
-  await assert.rejects(testProvider('grok', {dirs, baseUrl}), /returned 401/);
+  await assert.rejects(testProvider('grok', {dirs, baseUrl}), /rejected the API key/);
 });
 
 test('focus persists, updates, and advances through the queue', () => {
@@ -205,6 +205,45 @@ test('callProvider requires a configured API key', async () => {
     await assert.rejects(() => callProvider('openai', {systemPrompt: 's', userPrompt: 'u'}), /not configured/);
   } finally {
     if (before === undefined) delete process.env.GHOST_OPENAI_API_KEY; else process.env.GHOST_OPENAI_API_KEY = before;
+  }
+});
+
+test('runCycle stops immediately when no API key is saved, without running the suite', async () => {
+  const before = process.env.GHOST_OPENAI_API_KEY;
+  delete process.env.GHOST_OPENAI_API_KEY;
+  const repo = makeRepoWithTests(true);
+  const ghost = fs.mkdtempSync(path.join(os.tmpdir(), 'ghost-cycle-nokey-'));
+  try {
+    const report = await runCycle({codeRoot: repo, dirs: dirsFor(ghost), providerId: 'openai', autoPush: false});
+    assert.match(report.error, /no API key saved/);
+    // The point of the check is that it happens before any work: a baseline run here
+    // would mean the person waits through the whole suite to be told about the key.
+    assert.equal(report.baselineOk, null);
+    assert.equal(report.testResult, null);
+    assert.equal(report.committed, false);
+  } finally {
+    if (before === undefined) delete process.env.GHOST_OPENAI_API_KEY; else process.env.GHOST_OPENAI_API_KEY = before;
+    fs.rmSync(repo, {recursive: true, force: true});
+    fs.rmSync(ghost, {recursive: true, force: true});
+  }
+});
+
+test('callProvider explains an exhausted quota and a rejected key in plain words', async (t) => {
+  const cases = [
+    {status: 429, body: {error: {message: 'You have no credits remaining.', code: 'insufficient_quota'}}, expect: /no credit left/i},
+    {status: 429, body: {error: {message: 'Too many requests.'}}, expect: /rate limiting/i},
+    {status: 401, body: {error: {message: 'Incorrect API key provided.'}}, expect: /rejected the API key/i},
+  ];
+  for (const item of cases) {
+    const server = await startFakeProvider((req, res) => {
+      res.writeHead(item.status, {'Content-Type': 'application/json'});
+      res.end(JSON.stringify(item.body));
+    });
+    t.after(() => server.close());
+    await assert.rejects(
+      () => callProvider('openai', {apiKey: 'sk-test', systemPrompt: 's', userPrompt: 'u', baseUrl: `http://127.0.0.1:${server.address().port}`}),
+      item.expect,
+    );
   }
 });
 

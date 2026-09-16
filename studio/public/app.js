@@ -8,7 +8,25 @@ const findTab=(root,path)=>state.openFiles.find(t=>t.root===root&&t.path===path)
 const activeTab=()=>state.openFiles.find(t=>fileKey(t.root,t.path)===state.activeKey);
 let toastTimer;
 function toast(message,error=false){$('toast').textContent=message;$('toast').className='toast'+(error?' error':'');clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').classList.add('hidden'),5000);}
-async function api(url,options={}){const response=await fetch(url,{...options,headers:{'Content-Type':'application/json','X-Studio-Token':state.token,...options.headers}});const data=await response.json();if(!response.ok)throw new Error(data.error || 'Request failed');return data;}
+// "Failed to fetch" is what the browser says when it could not reach the server at all,
+// which for Ghost almost always means the server was closed while a tab stayed open.
+// Say that, instead of showing a message that means nothing to the person reading it.
+async function api(url,options={}){
+  let response;
+  try{
+    response=await fetch(url,{...options,headers:{'Content-Type':'application/json','X-Studio-Token':state.token,...options.headers}});
+  }catch{
+    throw new Error('Ghost\u2019s server is not responding. It may have been closed. Start Ghost again, then reload this page.');
+  }
+  const raw=await response.text();
+  let data=null;
+  try{ data=raw?JSON.parse(raw):null; }catch{ data=null; }
+  // A non-JSON body means something other than Ghost answered, so report the status
+  // rather than a JSON parse error that hides it.
+  if(!response.ok)throw new Error((data&&data.error)||`Request failed (${response.status} ${response.statusText||'error'}).`);
+  if(data===null&&raw)throw new Error(`Ghost sent a reply that could not be read (${response.status}).`);
+  return data;
+}
 function post(url,data,method='POST'){return api(url,{method,body:JSON.stringify(data)});}
 function safe(action){return (...args)=>Promise.resolve(action(...args)).catch(error=>toast(error.message,true));}
 function el(tag,className,text){const node=document.createElement(tag);if(className)node.className=className;if(text!==undefined)node.textContent=text;return node;}
@@ -90,7 +108,12 @@ async function clearProviderKeyUI(){const provider=$('si-provider').value;await 
 async function testProviderUI(){const provider=$('si-provider').value;$('si-test').disabled=true;$('si-key-status').textContent='Contacting the provider…';try{const result=await post('/api/self-improve/test',{provider});$('si-key-status').textContent=`✓ ${result.label} answered in ${result.latencyMs} ms using ${result.model}. Reply: ${result.reply}`;toast(`${result.label} is working.`);}catch(error){$('si-key-status').textContent=`✕ ${error.message}`;throw error;}finally{$('si-test').disabled=false;}}
 function renderSiHistory(){const list=$('si-history');list.replaceChildren();if(!state.siHistory?.length){list.append(el('p','memory-help','Run a cycle to see Ghost\'s proposed changes, test results, and whether they were committed and pushed.'));return;}for(const cycle of state.siHistory){const row=el('div','activity-row');const body=el('div');const outcome=cycle.committed?(cycle.pushed?'Committed and pushed':'Committed (push disabled)'):'Not applied';body.append(el('strong','',cycle.summary||cycle.focus||'Cycle'),el('p','',`${cycle.provider} · ${outcome} · tests ${cycle.testResult?.passed?'passed':cycle.testResult?'failed':'not run'}${cycle.attempts>1?` · ${cycle.attempts} attempts`:''}`));if(cycle.applied?.length)body.append(el('p','memory-help',`Files changed: ${cycle.applied.join(', ')}`));if(cycle.contextFiles?.length)body.append(el('p','memory-help',`Read for context: ${cycle.contextFiles.join(', ')}`));if(cycle.error)body.append(el('p','memory-help',cycle.error));if(cycle.diff){const details=el('details','si-diff');details.append(el('summary','','Review the change'));const pre=el('pre','si-diff-body');pre.textContent=cycle.diff;details.append(pre);body.append(details);}const time=el('time','',new Date(cycle.time).toLocaleString());row.append(body,time);list.append(row);}}
 async function saveFocus(){const focus=$('si-focus').value.trim();if(!focus)throw new Error('Describe a focus task for Ghost to work on.');const queue=$('si-queue').value.split('\n').map(s=>s.trim()).filter(Boolean);await post('/api/self-improve/focus',{focus,queue},'PUT');toast('Focus saved.');}
-async function runSelfImproveCycle(){const provider=$('si-provider').value;if(!provider)throw new Error('Choose an AI provider.');$('si-run').disabled=true;$('si-run-status').textContent='Running a cycle — proposing, applying, and testing a change…';try{const report=await post('/api/self-improve/run',{provider});$('si-run-status').textContent=report.error?`Cycle finished with an issue: ${report.error}`:`Cycle finished: ${report.committed?(report.pushed?'committed and pushed.':'committed.'):'no change applied.'}`;await loadSelfImprove();}finally{$('si-run').disabled=false;}}
+async function runSelfImproveCycle(){const provider=$('si-provider').value;if(!provider)throw new Error('Choose an AI provider.');$('si-run').disabled=true;$('si-run-status').textContent='Running a cycle — proposing, applying, and testing a change…';try{const report=await post('/api/self-improve/run',{provider});$('si-run-status').textContent=report.error?`Cycle finished with an issue: ${report.error}`:`Cycle finished: ${report.committed?(report.pushed?'committed and pushed.':'committed.'):'no change applied.'}`;await loadSelfImprove();}
+// A cycle takes minutes, so losing the connection part way through is the likely failure,
+// not a real failure of the cycle. The server records every outcome before it returns, so
+// say where the result went instead of leaving the run looking like it vanished.
+catch(error){$('si-run-status').textContent=`${error.message} The cycle itself keeps running on the server and its result is saved under History below.`;try{await loadSelfImprove();}catch{/* server is down; the message above already says so */}throw error;}
+finally{$('si-run').disabled=false;}}
 
 // Browser relay. The public chat is reached by the person, not by Ghost: they are already
 // signed in somewhere, so no API key is involved. This view exists to make the four steps

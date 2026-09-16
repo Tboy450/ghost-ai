@@ -65,6 +65,26 @@ test('fileAt reads a file as it existed at an earlier commit', () => {
   }
 });
 
+test('addWorktree recovers when a killed run left its worktree registered', () => {
+  const repo = makeRepo();
+  const first = fs.mkdtempSync(path.join(os.tmpdir(), 'ghost-worktree-stale-'));
+  const second = fs.mkdtempSync(path.join(os.tmpdir(), 'ghost-worktree-next-'));
+  fs.rmSync(first, {recursive: true, force: true});
+  fs.rmSync(second, {recursive: true, force: true});
+  try {
+    git.addWorktree(repo, first, 'ghost/self-update');
+    // Exactly what a killed process leaves behind: the directory is gone but git still
+    // has it registered against the branch. Before the fix this bricked every later run.
+    fs.rmSync(first, {recursive: true, force: true});
+    git.addWorktree(repo, second, 'ghost/self-update');
+    assert.equal(git.currentBranch(second), 'ghost/self-update');
+  } finally {
+    git.removeWorktree(repo, second);
+    fs.rmSync(repo, {recursive: true, force: true});
+    fs.rmSync(second, {recursive: true, force: true});
+  }
+});
+
 test('addWorktree/removeWorktree isolate changes on a dedicated branch', () => {
   const repo = makeRepo();
   const originalBranch = git.currentBranch(repo);

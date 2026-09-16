@@ -130,7 +130,24 @@ export async function callProvider(providerId, {apiKey, model, systemPrompt, use
     headers: {'Content-Type': 'application/json', Authorization: `Bearer ${key}`},
     body: JSON.stringify({model: model || info.defaultModel, temperature: 0.2, messages: [{role: 'system', content: systemPrompt}, {role: 'user', content: userPrompt}]}),
   });
-  if (!response.ok) throw fail(`${info.label} returned ${response.status}: ${(await response.text()).slice(0, 400)}`, 502);
+  // Providers report the two most common problems, no credit and a bad key, as raw JSON.
+  // Both are things the person can act on, so say them in plain words rather than dumping
+  // the payload and leaving them to find the reason inside it.
+  if (!response.ok) {
+    const raw = (await response.text()).slice(0, 600);
+    let detail = '';
+    try { detail = JSON.parse(raw)?.error?.message || ''; } catch { detail = ''; }
+    if (response.status === 401 || response.status === 403) {
+      throw fail(`${info.label} rejected the API key. Check it was copied in full and is still active. ${detail}`.trim(), 502);
+    }
+    if (response.status === 429) {
+      const outOfCredit = /quota|credit|billing|insufficient/i.test(detail);
+      throw fail(outOfCredit
+        ? `${info.label} has no credit left on this account, so it will not answer until billing is topped up. Until then use the Relay view, which needs no key. ${detail}`.trim()
+        : `${info.label} is rate limiting requests right now. Wait a moment and try again. ${detail}`.trim(), 502);
+    }
+    throw fail(`${info.label} returned ${response.status}: ${detail || raw}`, 502);
+  }
   const data = await response.json();
   const text = data.choices?.[0]?.message?.content;
   if (typeof text !== 'string' || !text.trim()) throw fail(`${info.label} returned an empty response.`, 502);
@@ -260,6 +277,14 @@ export async function runCycle({codeRoot, dirs, providerId, apiKey, model, testG
   const report = {time, provider: providerId, model: model || PROVIDERS[providerId]?.defaultModel, focus: focusState.focus, applied: [], contextFiles: [], attempts: 0, baselineOk: null, testResult: null, diff: null, committed: false, pushed: false, commitHash: null, branch, error: null, summary: null};
   const tmpDir = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'ghost-selfupdate-'));
   try {
+    // Check the key before doing any work. Without this the cycle sets up a worktree and
+    // runs the whole baseline suite first, then fails for a reason that was knowable at
+    // the start, which reads like the cycle broke rather than the key being missing.
+    if (!resolveKey(dirs, providerId, apiKey)) {
+      const info = PROVIDERS[providerId];
+      report.error = `${info?.label || providerId} has no API key saved. Open Self-improve, paste a key, and press Save, or set the ${info?.envKey || 'provider'} environment variable.`;
+      return report;
+    }
     addWorktree(codeRoot, tmpDir, branch);
 
     // Check the tests pass BEFORE touching anything. Otherwise an already-red repo
