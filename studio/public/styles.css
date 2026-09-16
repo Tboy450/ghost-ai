@@ -13,3 +13,6 @@
 .si-provider-row a{margin-left:auto;text-decoration:none}
 .si-provider-dot{width:8px;height:8px;border-radius:50%;background:var(--line);flex:none}
 .si-provider-dot.on{background:#3fb950}
+.si-diff { margin-top: .5rem; }
+.si-diff summary { cursor: pointer; color: var(--accent, #7aa2f7); font-size: .85rem; }
+.si-diff-body { max-height: 320px; overflow: auto; margin: .5rem 0 0; padding: .6rem .75rem; background: rgba(0,0,0,.25); border-radius: 6px; font-size: .78rem; line-height: 1.45; white-space: pre; }

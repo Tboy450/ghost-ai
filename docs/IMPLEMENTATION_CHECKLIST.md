@@ -88,6 +88,15 @@ the remote commit is verified.
   - [x] Live smoke test on a running server: provider listing, 409 with an actionable message for an unconfigured provider, key save/remove round-trip, no key leakage to the client, and `git check-ignore` confirming `.ghost/providers.json` is ignored.
   - [x] Connection status is tracked in `docs/AI_PROVIDERS.md` — update it as each provider is verified with a real key.
   - **Remaining:** no provider has been exercised against a real endpoint yet; that needs one real API key. Combining several providers' context into one cycle, and Janitor AI, are still to come.
+- [x] **7c. Polish the self-update cycle** *(user: "we have to polish that process")*
+  - [x] **The AI was working blind.** A cycle sent only a list of file *paths* — never any file contents — so the model could only guess and rewrite whole files from scratch. Added `gatherContext()`, which ranks files by overlap with the focus task, then sends their real contents inside a byte budget (default 60 KB, 12 files) so the prompt cannot grow unbounded. The system prompt now tells the model it is looking at real current content and must return complete files.
+  - [x] **An already-red repository was blamed on the AI.** The cycle now runs the test suite *before* proposing anything. If the repo is already failing it stops with a clear message and does not spend an API call, instead of reporting "the AI broke the tests".
+  - [x] **A single failed attempt was thrown away silently.** The cycle now feeds the actual test failure output back to the provider for one repair attempt (`repairAttempts`, default 1), resetting the worktree in between so a failed attempt cannot contaminate the retry. A cycle that fails, then fixes itself, now commits.
+  - [x] **Nothing was reviewable.** The report now records the committed `diff`, the files read for context, the number of attempts, and whether the baseline was green. The Self-improve history shows a collapsible "Review the change" diff for every cycle.
+  - [x] **The AI could disable its own safety rails.** Added `PROTECTED_PATHS`/`isProtectedPath`: a proposal touching `.git/`, `.ghost/`, `.github/workflows/` or `node_modules/` is rejected. This also stops the key store from ever being read into a prompt or rewritten.
+  - [x] New git helpers: `resetWorktree()` (clean slate between attempts) and `stageIntentToAdd()` (so newly added files actually appear in the recorded diff instead of producing an empty one).
+  - [x] Tests: the old "tests fail" test was conflating an already-red repo with an AI-broken change; split into a baseline-guard test and a genuine broken-proposal test, plus new tests for the repair-then-commit path (asserting the repair prompt really carries the failure output), protected-path rejection, and context gathering (focus ranking, budget enforcement, and never leaking `.ghost/` secrets).
+  - **Result:** Full suite — 46/46 passed. Live end-to-end run confirmed: baseline green → AI sees real source → first attempt breaks tests → repair attempt sees the failure → tests pass → committed and pushed to the isolated `ghost/self-update` branch, with an 8-line diff recorded in history.
 - [ ] **8. Add assisted coding and testing**
 - [ ] **9. Strengthen framework comparisons**
 - [ ] **10. Package Ghost as a desktop application**
@@ -116,5 +125,7 @@ the remote commit is verified.
 | 2026-09-15 | Step 7a compare removal | Complete | Compare tab/routes removed; bias-test content purged (repo-wide re-grep returns zero matches); `node --test studio/tests/*.test.mjs` — 39/39 passed |
 | 2026-09-15 | Step 7b provider key store tests | Passed | `node --test studio/tests/*.test.mjs` — 42/42 passed (key round-trip, env-var precedence, no key leakage, connection test success and rejection) |
 | 2026-09-15 | Step 7b provider live smoke test | Complete | Live server on port 4519: provider listing, 409 with actionable message when unconfigured, key save/remove round-trip, no key leaked to client, `git check-ignore` confirms `.ghost/providers.json` ignored |
+| 2026-09-15 | Step 7c self-update cycle hardening | Passed | `node --test studio/tests/*.test.mjs` — 46/46 passed (baseline guard, broken-proposal discard, repair-then-commit, protected paths, context gathering) |
+| 2026-09-15 | Step 7c cycle live verification | Complete | End-to-end run on a throwaway repo + bare remote: baseline green, AI received real file contents, first attempt failed, repair prompt carried the failure output, tests passed, committed and pushed to `ghost/self-update`, diff recorded in history |
 
 Update this file whenever a roadmap item is attempted, completed, or blocked.

@@ -29,8 +29,25 @@ Two options, in priority order:
    permissions. That folder is gitignored, so keys are never committed, and the
    server never sends a stored key back to the browser.
 
-## Verification evidence
+## What a connected provider is trusted to do
 
+Once a provider is connected it drives the self-improvement cycle, which is
+deliberately fenced in:
+
+- Work happens in a disposable git worktree on the `ghost/self-update` branch —
+  never your live checkout or branch.
+- The suite must be green **before** a cycle starts; an already-failing repo stops
+  the cycle instead of blaming the AI.
+- The model is shown the real contents of the files most related to the focus task,
+  within a byte budget, so it is not guessing.
+- If its change fails the tests, the failure output goes back to it for one repair
+  attempt on a clean worktree.
+- A commit happens only on green tests; a push only ever targets `ghost/self-update`.
+- Proposals touching `.git/`, `.ghost/`, `.github/workflows/` or `node_modules/` are
+  rejected, so a provider cannot read the key store or disable its own safety rails.
+- Every cycle records a reviewable diff in the Self-improve history.
+
+## Verification evidence
 - `studio/tests/selfimprove.test.mjs` covers: saved keys configure a provider,
   environment variables outrank saved keys, stored keys never appear in the
   provider listing, a successful `Test connection`, and a rejected key surfacing

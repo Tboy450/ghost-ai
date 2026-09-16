@@ -102,3 +102,19 @@ export function removeWorktree(root, worktreeDir) {
   run(root, ['worktree', 'remove', worktreeDir, '--force']);
 }
 
+// Records brand-new files as "intent to add" so `git diff` includes them. Without this
+// a proposal that only adds files produces an empty diff and looks like it changed nothing.
+export function stageIntentToAdd(root) {
+  ensureRepo(root);
+  run(root, ['add', '-A', '-N']);
+}
+
+// Throws away every uncommitted change in a worktree, returning it to its last commit.
+// Used between self-improvement repair attempts so a failed proposal cannot leak into
+// the next one and get blamed on it.
+export function resetWorktree(worktreeDir) {
+  ensureRepo(worktreeDir);
+  run(worktreeDir, ['reset', '--hard', 'HEAD']);
+  run(worktreeDir, ['clean', '-fd']);
+}
+

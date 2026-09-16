@@ -9,6 +9,7 @@ import {
   PROVIDERS, listProviders, getFocus, setFocus, advanceFocus,
   callProvider, parseProposal, applyProposal, runCycle, listHistory,
   setProviderKey, clearProviderKey, resolveKey, testProvider,
+  gatherContext, isProtectedPath,
 } from '../selfimprove.mjs';
 
 function run(dir, args) { return spawnSync('git', args, {cwd: dir, encoding: 'utf8'}); }
@@ -144,8 +145,46 @@ test('focus persists, updates, and advances through the queue', () => {
   }
 });
 
-test('parseProposal rejects unsafe paths and applyProposal writes safe files', () => {
-  assert.throws(() => parseProposal('```json\n' + JSON.stringify({summary: 's', files: [{path: '../escape.txt', content: 'x'}]}) + '\n```'), /unsafe file path/);
+test('protected paths cannot be rewritten by a proposal', () => {
+  assert.equal(isProtectedPath('.ghost/providers.json'), true);
+  assert.equal(isProtectedPath('.github/workflows/ci.yml'), true);
+  assert.equal(isProtectedPath('.git/config'), true);
+  assert.equal(isProtectedPath('studio/server.mjs'), false);
+  assert.equal(isProtectedPath('.github/README.md'), false);
+  for (const bad of ['.ghost/providers.json', '.github/workflows/ci.yml']) {
+    assert.throws(
+      () => parseProposal('```json\n' + JSON.stringify({summary: 's', files: [{path: bad, content: 'x'}]}) + '\n```'),
+      /protected path/,
+    );
+  }
+});
+
+test('gatherContext gives the AI the real contents of the files nearest the focus', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ghost-context-'));
+  try {
+    fs.mkdirSync(path.join(root, 'studio'), {recursive: true});
+    fs.mkdirSync(path.join(root, '.ghost'), {recursive: true});
+    fs.writeFileSync(path.join(root, 'studio', 'memory.mjs'), 'export const memory = 1;\n');
+    fs.writeFileSync(path.join(root, 'studio', 'unrelated.mjs'), 'export const other = 2;\n');
+    fs.writeFileSync(path.join(root, '.ghost', 'providers.json'), '{"secret":"sk-leak"}');
+
+    const picked = gatherContext(root, 'improve memory recall', {files: ['studio/memory.mjs', 'studio/unrelated.mjs', '.ghost/providers.json']});
+    // The focus-matching file ranks first and arrives with its actual content.
+    assert.equal(picked[0].path, 'studio/memory.mjs');
+    assert.match(picked[0].content, /export const memory/);
+    // Secrets must never be fed to a public AI.
+    assert.ok(!picked.some(f => f.path.startsWith('.ghost/')));
+    assert.ok(!JSON.stringify(picked).includes('sk-leak'));
+
+    // The prompt cannot grow without bound.
+    const budgeted = gatherContext(root, 'memory', {files: ['studio/memory.mjs', 'studio/unrelated.mjs'], budget: 10});
+    assert.ok(budgeted.reduce((n, f) => n + f.content.length, 0) <= 10);
+  } finally {
+    fs.rmSync(root, {recursive: true, force: true});
+  }
+});
+
+test('parseProposal rejects unsafe paths and applyProposal writes safe files', () => {  assert.throws(() => parseProposal('```json\n' + JSON.stringify({summary: 's', files: [{path: '../escape.txt', content: 'x'}]}) + '\n```'), /unsafe file path/);
   assert.throws(() => parseProposal('not json at all'), /valid JSON/);
   assert.throws(() => parseProposal('```json\n' + JSON.stringify({summary: 's', files: []}) + '\n```'), /no file changes/);
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ghost-apply-'));
@@ -206,10 +245,12 @@ test('runCycle end-to-end: passing tests lead to a commit and push on an isolate
   }
 });
 
-test('runCycle discards the change without committing when tests fail', async (t) => {
+test('runCycle stops early when the repository tests were already failing', async (t) => {
   const repo = makeRepoWithTests(false);
-  const ghost = fs.mkdtempSync(path.join(os.tmpdir(), 'ghost-cycle-fail-ghost-'));
+  const ghost = fs.mkdtempSync(path.join(os.tmpdir(), 'ghost-cycle-baseline-'));
+  let called = false;
   const server = await startFakeProvider((req, res) => {
+    called = true;
     res.writeHead(200, {'Content-Type': 'application/json'});
     res.end(proposalReply('Attempt fix', [{path: 'NOTES.md', content: 'attempted\n'}]));
   });
@@ -221,13 +262,87 @@ test('runCycle discards the change without committing when tests fail', async (t
       baseUrl: `http://127.0.0.1:${server.address().port}`,
       testGlob: 'studio/tests/*.test.mjs', branch: 'ghost/self-update',
     });
+    assert.equal(report.baselineOk, false);
+    assert.equal(report.committed, false);
+    assert.match(report.error, /already failing/);
+    // No point spending a paid API call on a repo that cannot go green.
+    assert.equal(called, false);
+  } finally {
+    fs.rmSync(repo, {recursive: true, force: true});
+    fs.rmSync(ghost, {recursive: true, force: true});
+  }
+});
+
+test('runCycle discards the change without committing when the proposal breaks the tests', async (t) => {
+  const repo = makeRepoWithTests(true);
+  const ghost = fs.mkdtempSync(path.join(os.tmpdir(), 'ghost-cycle-fail-ghost-'));
+  const breaking = {path: 'studio/tests/broken.test.mjs', content: "import test from 'node:test';\nimport assert from 'node:assert/strict';\ntest('broken', () => { assert.equal(1, 2); });\n"};
+  let calls = 0;
+  const server = await startFakeProvider((req, res) => {
+    calls++;
+    res.writeHead(200, {'Content-Type': 'application/json'});
+    res.end(proposalReply('Attempt fix', [breaking]));
+  });
+  t.after(() => server.close());
+  try {
+    const dirs = dirsFor(ghost);
+    const report = await runCycle({
+      codeRoot: repo, dirs, providerId: 'openai', apiKey: 'sk-test',
+      baseUrl: `http://127.0.0.1:${server.address().port}`,
+      testGlob: 'studio/tests/*.test.mjs', branch: 'ghost/self-update',
+    });
+    assert.equal(report.baselineOk, true);
     assert.equal(report.testResult.passed, false);
     assert.equal(report.committed, false);
     assert.equal(report.pushed, false);
     assert.match(report.error, /Tests failed/);
+    // One proposal plus one repair attempt, and the repair saw the failure output.
+    assert.equal(calls, 2);
+    assert.equal(report.attempts, 2);
   } finally {
     fs.rmSync(repo, {recursive: true, force: true});
     fs.rmSync(ghost, {recursive: true, force: true});
+  }
+});
+
+test('runCycle sends the test failure back and commits a successful repair', async (t) => {
+  const repo = makeRepoWithTests(true);
+  const ghost = fs.mkdtempSync(path.join(os.tmpdir(), 'ghost-cycle-repair-'));
+  const remote = makeBareRemote();
+  run(repo, ['remote', 'add', 'origin', remote]);
+  const prompts = [];
+  let calls = 0;
+  const server = await startFakeProvider((req, res, body) => {
+    prompts.push(JSON.parse(body).messages.map(m => m.content).join('\n'));
+    calls++;
+    res.writeHead(200, {'Content-Type': 'application/json'});
+    // First answer breaks the suite; the second, having seen the failure, fixes it.
+    const files = calls === 1
+      ? [{path: 'studio/tests/extra.test.mjs', content: "import test from 'node:test';\nimport assert from 'node:assert/strict';\ntest('extra', () => { assert.equal(1, 2); });\n"}]
+      : [{path: 'studio/tests/extra.test.mjs', content: "import test from 'node:test';\nimport assert from 'node:assert/strict';\ntest('extra', () => { assert.equal(1, 1); });\n"}];
+    res.end(proposalReply(calls === 1 ? 'Add a check' : 'Add a passing check', files));
+  });
+  t.after(() => server.close());
+  try {
+    const dirs = dirsFor(ghost);
+    const report = await runCycle({
+      codeRoot: repo, dirs, providerId: 'openai', apiKey: 'sk-test',
+      baseUrl: `http://127.0.0.1:${server.address().port}`,
+      testGlob: 'studio/tests/*.test.mjs', branch: 'ghost/self-update',
+    });
+    assert.equal(report.error, null);
+    assert.equal(report.attempts, 2);
+    assert.equal(report.committed, true);
+    assert.equal(report.pushed, true);
+    assert.ok(report.commitHash);
+    // The repair prompt must actually carry the failure output, or it is just a re-roll.
+    assert.match(prompts[1], /test suite then FAILED/);
+    // And the report must show a reviewable diff of what was committed.
+    assert.match(report.diff, /extra\.test\.mjs/);
+  } finally {
+    fs.rmSync(repo, {recursive: true, force: true});
+    fs.rmSync(ghost, {recursive: true, force: true});
+    fs.rmSync(remote, {recursive: true, force: true});
   }
 });
 

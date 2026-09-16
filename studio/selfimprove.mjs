@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { spawnSync } from 'node:child_process';
-import { addWorktree, removeWorktree, commit, push } from './git.mjs';
+import { addWorktree, removeWorktree, resetWorktree, stageIntentToAdd, commit, push, diff } from './git.mjs';
 
 function fail(message, status = 400) { return Object.assign(new Error(message), {status}); }
 
@@ -137,7 +137,7 @@ export async function callProvider(providerId, {apiKey, model, systemPrompt, use
   return text;
 }
 
-const SYSTEM_PROMPT = `You are one of several public AI models Ghost (a local AI coding studio) consults to improve its own codebase. Respond with ONLY a single fenced \`\`\`json code block containing an object: {"summary": short string, "files": [{"path": "relative/path.ext", "content": "full new file content"}], "notes": short string}. Each path must be a relative path inside the project with no ".." segments. Prefer small, safe, additive changes. Do not include explanations outside the JSON block.`;
+const SYSTEM_PROMPT = `You are one of several public AI models Ghost (a local AI coding studio) consults to improve its own codebase. You are shown the repository's file list and the full current contents of the most relevant files. Respond with ONLY a single fenced \`\`\`json code block containing an object: {"summary": short string, "files": [{"path": "relative/path.ext", "content": "full new file content"}], "notes": short string}. For every file you change you must return its COMPLETE new content, not a patch or a fragment, based on the contents you were shown. Each path must be a relative path inside the project with no ".." segments, and must not touch .git/, .ghost/, .github/workflows/ or node_modules/. The project's test suite must still pass after your change, so keep changes small, safe and self-consistent, and update or add tests when behaviour changes. Do not include explanations outside the JSON block.`;
 
 export function buildRepoSummary(root, limit = 200) {
   const list = [];
@@ -153,6 +153,55 @@ export function buildRepoSummary(root, limit = 200) {
   return list;
 }
 
+// Paths a self-improvement cycle may never rewrite. Without this an AI could disable
+// its own safety rails, rewrite the CI that reviews its work, or clobber the key store.
+export const PROTECTED_PATHS = ['.git/', '.ghost/', '.github/workflows/', 'node_modules/'];
+
+export function isProtectedPath(relPath) {
+  const normalized = relPath.split(path.sep).join('/').replace(/^\.\//, '');
+  return PROTECTED_PATHS.some(p => normalized === p.replace(/\/$/, '') || normalized.startsWith(p));
+}
+
+// The AI needs to read code before it can change it. Given only a file list it can
+// only guess and will rewrite whole files blind, which is why proposals kept failing
+// their tests. This picks the files most related to the focus task and includes their
+// real contents, staying inside a byte budget so the prompt cannot grow unbounded.
+export function gatherContext(root, focus, {files, budget = 60000, maxFiles = 12} = {}) {
+  const candidates = (files || buildRepoSummary(root)).filter(f => !isProtectedPath(f) && /\.(mjs|js|json|md|css|html|py|ps1)$/.test(f));
+  const words = String(focus || '').toLowerCase().match(/[a-z0-9]{3,}/g) || [];
+  const scored = candidates.map(file => {
+    const lower = file.toLowerCase();
+    let score = words.reduce((total, word) => total + (lower.includes(word) ? 3 : 0), 0);
+    if (lower.startsWith('studio/')) score += 2;
+    if (lower.includes('/tests/') || lower.includes('test')) score += 1;
+    if (lower.endsWith('.md')) score -= 1;
+    return {file, score};
+  }).sort((a, b) => b.score - a.score || a.file.localeCompare(b.file));
+
+  const included = [];
+  let used = 0;
+  for (const {file} of scored) {
+    if (included.length >= maxFiles || used >= budget) break;
+    let content;
+    try { content = fs.readFileSync(path.join(root, file), 'utf8'); } catch { continue; }
+    if (content.includes('\0')) continue;
+    const remaining = budget - used;
+    if (content.length > remaining) {
+      if (remaining < 2000) continue;
+      content = `${content.slice(0, remaining)}\n... (truncated)`;
+    }
+    used += content.length;
+    included.push({path: file, content});
+  }
+  return included;
+}
+
+function renderContext(contextFiles) {
+  if (!contextFiles.length) return '';
+  return `\n\nCurrent contents of the most relevant files. Base your change on these, and return the COMPLETE new content for any file you modify:\n${
+    contextFiles.map(f => `\n--- ${f.path} ---\n${f.content}`).join('\n')}`;
+}
+
 // Extracts the first fenced ```json block and validates the expected {summary, files, notes} shape.
 export function parseProposal(text) {
   const match = /```json\s*([\s\S]*?)```/.exec(text) || [null, text];
@@ -162,6 +211,7 @@ export function parseProposal(text) {
   for (const file of proposal.files) {
     if (typeof file.path !== 'string' || typeof file.content !== 'string') throw fail('Each proposed file needs a path and content.', 502);
     if (file.path.includes('..') || path.isAbsolute(file.path) || file.path.includes('\0')) throw fail(`Rejected an unsafe file path: ${file.path}`, 502);
+    if (isProtectedPath(file.path)) throw fail(`Rejected a change to a protected path: ${file.path}`, 502);
   }
   if (!proposal.files.length) throw fail('The AI proposed no file changes.', 502);
   if (proposal.files.length > 12) throw fail('The AI proposed too many files at once (limit 12 per cycle).', 502);
@@ -204,22 +254,51 @@ export function listHistory(dirs, limit = 50) {
 // Runs exactly one self-improvement cycle: propose -> apply -> test -> (commit + push) | (discard).
 // `codeRoot` is the repository to improve (its own app source, or any git-backed project).
 // The work happens in a disposable worktree/branch so the caller's live checkout is never touched.
-export async function runCycle({codeRoot, dirs, providerId, apiKey, model, testGlob = 'studio/tests/*.test.mjs', branch = 'ghost/self-update', autoPush = true, remote = 'origin', fetchImpl, baseUrl, focusOverride}) {
+export async function runCycle({codeRoot, dirs, providerId, apiKey, model, testGlob = 'studio/tests/*.test.mjs', branch = 'ghost/self-update', autoPush = true, remote = 'origin', fetchImpl, baseUrl, focusOverride, repairAttempts = 1, contextBudget = 60000}) {
   const focusState = focusOverride ? {focus: focusOverride, queue: getFocus(dirs).queue} : getFocus(dirs);
   const time = new Date().toISOString();
-  const report = {time, provider: providerId, model: model || PROVIDERS[providerId]?.defaultModel, focus: focusState.focus, applied: [], testResult: null, committed: false, pushed: false, commitHash: null, branch, error: null, summary: null};
+  const report = {time, provider: providerId, model: model || PROVIDERS[providerId]?.defaultModel, focus: focusState.focus, applied: [], contextFiles: [], attempts: 0, baselineOk: null, testResult: null, diff: null, committed: false, pushed: false, commitHash: null, branch, error: null, summary: null};
   const tmpDir = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'ghost-selfupdate-'));
   try {
     addWorktree(codeRoot, tmpDir, branch);
+
+    // Check the tests pass BEFORE touching anything. Otherwise an already-red repo
+    // gets blamed on the AI, and every cycle fails for a reason it cannot fix.
+    const baseline = runTests(tmpDir, testGlob);
+    report.baselineOk = baseline.passed;
+    if (!baseline.passed) {
+      report.error = 'The repository tests were already failing before any change was proposed, so this cycle stopped. Fix the existing failures first.';
+      report.testResult = baseline;
+      return report;
+    }
+
     const files = buildRepoSummary(tmpDir);
-    const userPrompt = `Focus task: ${focusState.focus}\n\nRepository files (relative paths):\n${files.join('\n')}\n\nPropose the smallest safe change that makes progress on the focus task.`;
-    const raw = await callProvider(providerId, {apiKey: resolveKey(dirs, providerId, apiKey), model, systemPrompt: SYSTEM_PROMPT, userPrompt, fetchImpl, baseUrl});
-    const proposal = parseProposal(raw);
-    report.summary = proposal.summary;
-    report.applied = applyProposal(tmpDir, proposal);
-    report.testResult = runTests(tmpDir, testGlob);
-    if (!report.testResult.passed) { report.error = 'Tests failed after applying the proposal; change was discarded.'; return report; }
-    const committed = commit(tmpDir, `Self-improvement: ${proposal.summary}`.slice(0, 300), {authorName: 'Ghost Self-Improvement', authorEmail: 'ghost-self-improve@local'});
+    const contextFiles = gatherContext(tmpDir, focusState.focus, {files, budget: contextBudget});
+    report.contextFiles = contextFiles.map(f => f.path);
+    const basePrompt = `Focus task: ${focusState.focus}\n\nRepository files (relative paths):\n${files.join('\n')}${renderContext(contextFiles)}\n\nPropose the smallest safe change that makes progress on the focus task.`;
+
+    let userPrompt = basePrompt;
+    let lastError = null;
+    for (let attempt = 0; attempt <= repairAttempts; attempt++) {
+      report.attempts = attempt + 1;
+      // Each retry re-applies to a clean worktree so a failed attempt cannot leak into the next.
+      if (attempt > 0) resetWorktree(tmpDir);
+      const raw = await callProvider(providerId, {apiKey: resolveKey(dirs, providerId, apiKey), model, systemPrompt: SYSTEM_PROMPT, userPrompt, fetchImpl, baseUrl});
+      const proposal = parseProposal(raw);
+      report.summary = proposal.summary;
+      report.applied = applyProposal(tmpDir, proposal);
+      report.testResult = runTests(tmpDir, testGlob);
+      if (report.testResult.passed) { lastError = null; break; }
+      lastError = 'Tests failed after applying the proposal; change was discarded.';
+      // Give the AI its own failure output so it can correct the change instead of
+      // the cycle silently throwing the work away.
+      userPrompt = `${basePrompt}\n\nYour previous attempt was: ${proposal.summary}\nIt changed: ${report.applied.join(', ')}\nThe test suite then FAILED with this output:\n${report.testResult.output.slice(-4000)}\n\nFix the problem and return a corrected complete proposal in the same JSON format.`;
+    }
+    if (lastError) { report.error = lastError; return report; }
+
+    stageIntentToAdd(tmpDir);
+    report.diff = diff(tmpDir).slice(0, 20000);
+    const committed = commit(tmpDir, `Self-improvement: ${proposalMessage(report.summary)}`, {authorName: 'Ghost Self-Improvement', authorEmail: 'ghost-self-improve@local'});
     report.committed = true; report.commitHash = committed.hash;
     if (autoPush) { push(tmpDir, {remote, branch}); report.pushed = true; }
     advanceFocus(dirs);
@@ -233,3 +312,5 @@ export async function runCycle({codeRoot, dirs, providerId, apiKey, model, testG
     saveReport(dirs, report);
   }
 }
+
+function proposalMessage(summary) { return String(summary || 'update').slice(0, 300); }
