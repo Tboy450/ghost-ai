@@ -247,6 +247,26 @@ export function applyProposal(root, proposal) {
   return written;
 }
 
+// Pulls the failing test names out of a node --test run so the report can say which
+// tests are red. Being told "fix the existing failures first" without being told which
+// ones leaves you re-running the suite by hand to find out.
+export function namedFailures(output, limit = 8) {
+  if (!output) return '';
+  const seen = [];
+  for (const line of String(output).split('\n')) {
+    const match = /^\s*(?:✖|not ok \d+ -)\s+(.*?)(?:\s*\(\d[\d.]*ms\))?\s*$/.exec(line);
+    if (!match) continue;
+    const name = match[1].trim();
+    if (!name || /^failing tests/i.test(name) || seen.includes(name)) continue;
+    seen.push(name);
+  }
+  if (!seen.length) return '';
+  const shown = seen.slice(0, limit);
+  const rest = seen.length - shown.length;
+  const tail = rest > 0 ? `, and ${rest} more` : '';
+  return `Failing ${shown.length === 1 && !rest ? 'test' : 'tests'}: ${shown.join('; ')}${tail}.`;
+}
+
 export const TEST_TIMEOUT_MS = 10 * 60 * 1000;
 
 export function runTests(root, testGlob, {timeoutMs = TEST_TIMEOUT_MS} = {}) {
@@ -302,7 +322,9 @@ export async function runCycle({codeRoot, dirs, providerId, apiKey, model, testG
     const baseline = runTests(tmpDir, testGlob);
     report.baselineOk = baseline.passed;
     if (!baseline.passed) {
-      report.error = 'The repository tests were already failing before any change was proposed, so this cycle stopped. Fix the existing failures first.';
+      report.error = baseline.timedOut
+        ? `The repository tests did not finish in time, so this cycle stopped before proposing anything. ${namedFailures(baseline.output)}`.trim()
+        : `The repository tests were already failing before any change was proposed, so this cycle stopped. Fix the existing failures first. ${namedFailures(baseline.output)}`.trim();
       report.testResult = baseline;
       return report;
     }

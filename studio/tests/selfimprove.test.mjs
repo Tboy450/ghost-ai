@@ -9,8 +9,42 @@ import {
   PROVIDERS, listProviders, getFocus, setFocus, advanceFocus,
   callProvider, parseProposal, applyProposal, runCycle, listHistory,
   setProviderKey, clearProviderKey, resolveKey, testProvider,
-  gatherContext, isProtectedPath, runTests,
+  gatherContext, isProtectedPath, runTests, namedFailures,
 } from '../selfimprove.mjs';
+
+// "Fix the existing failures first" without saying which ones sends you off to re-run
+// the suite by hand. This is the real output from a live cycle that stopped on baseline.
+test('a baseline failure names the tests that are red', () => {
+  const real = [
+    '\u2716 a test suite that never finishes is stopped and reported as a failure (3023.1114ms)',
+    '\u2716 failing tests:',
+    '\u2716 a test suite that never finishes is stopped and reported as a failure (3023.1114ms)',
+  ].join('\n');
+  const summary = namedFailures(real);
+  assert.match(summary, /a test suite that never finishes/);
+  assert.doesNotMatch(summary, /failing tests:/, 'the section header is not a test name');
+  assert.doesNotMatch(summary, /3023/, 'timings are noise here');
+  assert.equal(summary.match(/never finishes/g).length, 1, 'the same test is not listed twice');
+});
+
+test('a baseline summary stays short when many tests fail, and says nothing when none do', () => {
+  const many = Array.from({length: 12}, (_, i) => `not ok ${i + 1} - test number ${i + 1}`).join('\n');
+  const summary = namedFailures(many);
+  assert.match(summary, /test number 1;/);
+  assert.match(summary, /and 4 more\./);
+  assert.equal(namedFailures('\u2714 all good\n\u2139 pass 126\n\u2139 fail 0'), '');
+  assert.equal(namedFailures(''), '');
+});
+
+// Windows keeps a handle on a killed process's working directory for a short moment,
+// so a cleanup running straight after a SIGKILL hits EPERM and fails an otherwise
+// good test. Cleanup must never be the thing that fails a test.
+function removeWhenReleased(dir) {
+  for (let attempt = 0; attempt < 20; attempt++) {
+    try { fs.rmSync(dir, {recursive: true, force: true}); return; }
+    catch { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100); }
+  }
+}
 
 // A suite that never returns used to hold the worktree and the update branch open
 // forever, leaving a spinner and no report at all. A real apply wedged for over ten
@@ -29,7 +63,7 @@ test('a test suite that never finishes is stopped and reported as a failure', ()
     assert.match(result.output, /nothing in your project changed/);
     assert.ok(Date.now() - started < 60000, 'it must give up near its deadline, not run on');
   } finally {
-    fs.rmSync(dir, {recursive: true, force: true});
+    removeWhenReleased(dir);
   }
 });
 
