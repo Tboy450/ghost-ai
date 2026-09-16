@@ -1,5 +1,52 @@
 # Ghost — where we are and what's next
 
+## Task list
+
+Tick these off as they land. Each needs a dated row in
+`docs/IMPLEMENTATION_CHECKLIST.md` with the real result before it counts as done.
+
+### Step 7 — Git integration (next)
+
+`studio/git.mjs` already does worktrees, branches, commits, pushes and diffing, because
+self-update needed them. What is missing is everything the user touches.
+
+- [ ] **Named checkpoints.** Save the working tree under a name you choose, list them
+      with times, and return to one. Must survive a restart.
+- [ ] **Readable change review.** What changed, in summary form — files touched, what
+      each change does — not a raw diff wall. The diff stays available underneath.
+- [ ] **Commit and push from the UI.** Show the branch and the exact file list before
+      anything happens. Never stage unrelated edits.
+- [ ] **Restore.** Return to a checkpoint and confirm the tree matches, with a clear
+      warning about what will be discarded.
+- [ ] **Failure cases tested live.** No remote configured, rejected push, dirty tree,
+      conflict on restore. Each must give a readable message, not raw git output.
+
+### Step 9 — Comparisons
+
+- [ ] **Real scoring.** Matched questions, recorded configuration, actual correctness,
+      recall, latency and memory use. Build on `scripts/bench_memory.mjs`.
+- [ ] **Separate human review from heuristic scores.** Never present a heuristic as a
+      judgement.
+- [ ] **Repeatable.** The same inputs give the same numbers, so a change can be shown
+      to be an improvement rather than assumed to be one.
+
+### Step 10 — Desktop packaging
+
+- [ ] **Install and first run** on a machine with nothing set up.
+- [ ] **Startup diagnostics** — say which part is missing in plain words when Ghost
+      cannot start.
+- [ ] **Model setup** from inside the app.
+- [ ] **Updates that preserve user data** — conversations, memory and projects survive.
+
+### Carried debt
+
+- [ ] **Tune the two `extractSegment` thresholds** — collapse at 0.4, balloon at 3× are
+      still guesses. Measure them the way the 900 budget was measured.
+- [ ] **Raise the local model's hit rate** — narrower per-segment instructions, or a
+      larger model. Currently around half of rewrites are usable.
+- [ ] **Top up OpenAI billing** to unblock the API path. No code change can do this.
+      The relay path needs no key and is unaffected.
+
 ## Where we are
 
 Steps 1–7 of the ten-step roadmap are done. The browser relay — the self-improvement
