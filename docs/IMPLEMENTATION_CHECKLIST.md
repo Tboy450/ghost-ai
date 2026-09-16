@@ -150,3 +150,9 @@ Update this file whenever a roadmap item is attempted, completed, or blocked.
 | 2026-09-15 | Memory: depths of recall | Passed | `node --test studio/tests/recall.test.mjs` - 12/12; five-layer ladder (reflex, status, chip, archive, links) that stops climbing once satisfied |
 | 2026-09-15 | Memory: two bugs caught by tests | Fixed | Standing rules were given triggers from their own text, so they only fired when the question already repeated them; link rarity ceiling scaled with archive size and excluded the cluster terms on a small archive |
 | 2026-09-15 | Full suite | Passed | `node --test studio/tests/*.test.mjs` - 109/109 passed |
+| 2026-09-16 | Memory: layers wired into the app | Passed | Chat path now calls `recallLayered` instead of flat recall; addresses the model asked for last turn are honoured on the next one. Five `/api/layers*` routes added |
+| 2026-09-16 | Memory: link graph refresh | Fixed | `buildLinks` only ever ran on a manual trigger, so the map went stale; it now rebuilds every 10 turns and recall degrades to its other four layers in between |
+| 2026-09-16 | Memory: layer API tests | Passed | `node --test studio/tests/layers.test.mjs` - 3/3 against a live server; proves an unconditional rule reaches the prompt on a question that shares no words with it |
+| 2026-09-16 | Memory: two wiring bugs caught by the new tests | Fixed | `memoryState` never reported the ladder, so the UI could not show quiet layers; `/api/layers/learn` returned the whole `buildLinks` object where the caller expected a count |
+| 2026-09-16 | Memory view UI | Passed | Depth bar shows which layer carried the turn and which were skipped; standing rules can be added, removed, and learned; recalled pockets now show their address |
+| 2026-09-16 | Full suite | Passed | `node --test studio/tests/*.test.mjs` - 112/112 passed |

@@ -73,6 +73,16 @@ the decisions already made — and the map can reach those when the words cannot
 A rule added without a trigger is unconditional and always present. Rules added with a
 trigger stay silent until their subject comes up.
 
+You can see and steer all of this from the Memory view. A bar shows which depths carried the
+last turn and which stayed quiet — a skipped layer is good news, because it means a cheaper
+one already had the answer. Standing rules can be added, removed, or learned from what you
+have already settled, and each recalled pocket shows its address, so it is visible what the
+model is able to ask for by name on a later turn.
+
+The associative map is a whole-graph rebuild, so it refreshes every tenth turn rather than
+every turn, or on demand from **Learn rules from history**. In between, recall simply uses
+its other four layers.
+
 ### Compression, and why it is shared
 
 Spans of conversation are compressed into pockets. Pockets used to be compressed

@@ -268,6 +268,8 @@ export function memoryState(dirs, {profile = 'medium'} = {}) {
     reflexes: readReflexes(dirs),
     status: readStatus(dirs),
     chip: chipState(dirs, {profile}),
+    // The ladder itself, so a caller can show every layer including the ones that stayed quiet.
+    depths: DEPTHS.slice(),
   };
 }
 

@@ -5,7 +5,8 @@ import { fileURLToPath } from 'node:url';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { listFiles, readFile, saveFile, searchProject, modelStream, BASE_PROMPT } from './core.mjs';
 import { packContext, packAdaptive, PROFILES } from './memory.mjs';
-import { rememberConversation, forgetConversation, recall, renderRecall, archiveStats, expandPocket } from './archive.mjs';
+import { rememberConversation, forgetConversation, recall, archiveStats, expandPocket, buildLinks } from './archive.mjs';
+import { recallLayered, memoryState, parseRequests, addReflex, removeReflex, readReflexes, learnReflexes, setStatus, readStatus } from './recall.mjs';
 import { openProject, listProjects, activeProject, switchProject, closeProject, ensureProjectDirs } from './projects.mjs';
 import * as git from './git.mjs';
 import { listProviders, getFocus, setFocus, runCycle, listHistory, setProviderKey, clearProviderKey, testProvider, PROVIDERS } from './selfimprove.mjs';
@@ -42,6 +43,10 @@ function applyProject(nextProject) {
 }
 applyProject(project || openProject(REGISTRY_PATH, path.join(CONFIG_DIR,'workspace'), 'My workspace'));
 const active = new Set();
+// The associative link graph is rebuilt wholesale, so it runs on a cadence instead of on
+// every turn. Recall degrades to its other four layers in between, never to nothing.
+const LINK_REBUILD_EVERY = 10;
+let turnsSinceLinks = LINK_REBUILD_EVERY;
 let selfImproveBusy = false;
 let relayBusy = false;
 const PROVIDERS_SET = new Set(Object.keys(PROVIDERS));
@@ -96,14 +101,26 @@ async function chat(req,res,input) {
     let system=BASE_PROMPT+(input.framework?'\n\nReasoning framework:\n'+frameworkPrompt():'');
     // Long-term recall runs as its own level on top of the planner. It only adds notes the
     // live transcript cannot supply, and any failure here must never cost the user a turn.
-    let recalled=[];
+    let recalled=[],depths=[];
     try {
-      recalled=recall(dirs,input.prompt,{limit:6,excludeConversation:session.id});
-      const block=renderRecall(dirs,recalled,{budget:700});
-      if (block) system+='\n\n'+block;
-    } catch { recalled=[]; }
+      // Addresses the model asked for last turn are honoured first, so a request to see a
+      // digest in full survives the turn boundary instead of evaporating with the answer.
+      const asked=parseRequests(session.messages.filter(m=>m.role==='assistant').slice(-1)[0]?.content || '');
+      const layered=recallLayered(dirs,input.prompt,{
+        profile:session.chipProfile || 'medium',
+        explicit:asked,
+        excludeConversation:session.id,
+      });
+      if (layered.text) system+='\n\n'+layered.text;
+      depths=layered.depths || [];
+      recalled=(layered.chip?.lines || []).filter(line=>line.tier!=='packed').map(line=>({
+        id:line.id,conversation:String(line.id || '').split(':')[0],title:line.title,kind:line.kind,
+        digest:String(line.digest || ''),address:line.address,tier:line.tier,
+      }));
+    } catch { recalled=[];depths=[]; }
     const packed = profile==='auto' ? packAdaptive(session.messages,system,context,session.pinned || []) : packContext(session.messages,system,context,profile,session.pinned || []);
-    packed.stats.recalled=recalled.map(pocket=>({id:pocket.id,conversation:pocket.conversation,title:pocket.title,kind:pocket.kind,digest:pocket.digest.slice(0,180)}));
+    packed.stats.recalled=recalled.map(pocket=>({id:pocket.id,conversation:pocket.conversation,title:pocket.title,kind:pocket.kind,digest:pocket.digest.slice(0,180),address:pocket.address,tier:pocket.tier}));
+    packed.stats.depths=depths;
     session.lastContext=packed.stats;session.profile=input.profile==='auto'?'auto':packed.stats.profile;saveSession(session);
     stream.send({type:'context',stats:packed.stats});
     for await (const event of modelStream(OLLAMA,input.model,packed.messages,stream.controller.signal,PROFILES[packed.stats.profile])) {
@@ -116,6 +133,9 @@ async function chat(req,res,input) {
     saveSession(session); eventLog('chat',`${session.title} · ${input.model}`);
     // Index the finished exchange so later conversations can recall it.
     try { rememberConversation(dirs,session.id,session.title,session.messages); } catch { /* recall is optional */ }
+    // The link graph is a full rebuild, so it runs on a cadence rather than every turn.
+    // Recall still works without it; it only loses the associative layer until it refreshes.
+    try { if (++turnsSinceLinks>=LINK_REBUILD_EVERY) { turnsSinceLinks=0; buildLinks(dirs); } } catch { /* optional */ }
     stream.send({type:'done',session});
   } catch (error) {
     const stopped=stream.controller.signal.aborted;
@@ -172,6 +192,37 @@ const server=http.createServer(async(req,res)=>{
       const pocketId=url.searchParams.get('pocket');
       if (pocketId) { const pocket=expandPocket(dirs,pocketId); if(!pocket) throw fail('That note is no longer stored.',404); return json(res,200,pocket); }
       return json(res,200,{...archiveStats(dirs),results:query.trim()?recall(dirs,query,{limit:10,excludeConversation:exclude}):[]});
+    }
+    if (req.method==='GET' && url.pathname==='/api/layers') {
+      return json(res,200,memoryState(dirs,{profile:url.searchParams.get('profile') || 'medium'}));
+    }
+    if (req.method==='POST' && url.pathname==='/api/layers/reflex') {
+      const input=await body(req);
+      if (typeof input.text!=='string' || !input.text.trim() || input.text.length>400) throw fail('A rule must be 1-400 characters.');
+      if (input.trigger!==undefined && (typeof input.trigger!=='string' || input.trigger.length>200)) throw fail('Invalid trigger.');
+      // No trigger means the rule is unconditional, which is the point of a standing rule.
+      const entry=addReflex(dirs,input.text,{trigger:input.trigger || ''});
+      eventLog('reflex_added',input.text.slice(0,60));
+      return json(res,201,{entry,reflexes:readReflexes(dirs)});
+    }
+    if (req.method==='DELETE' && url.pathname==='/api/layers/reflex') {
+      const input=await body(req);
+      if (typeof input.id!=='string' || !input.id) throw fail('Invalid rule.');
+      if (!removeReflex(dirs,input.id)) throw fail('That rule is already gone.',404);
+      return json(res,200,{reflexes:readReflexes(dirs)});
+    }
+    if (req.method==='POST' && url.pathname==='/api/layers/learn') {
+      // Promotes archived constraints into standing rules, and refreshes the link graph.
+      const learned=learnReflexes(dirs,{limit:12});
+      const map=buildLinks(dirs);
+      eventLog('layers_learned',`${learned.added} rules · ${map.links} links`);
+      return json(res,200,{...learned,links:map.links,pockets:map.pockets,reflexes:readReflexes(dirs)});
+    }
+    if (req.method==='PUT' && url.pathname==='/api/layers/status') {
+      const input=await body(req);
+      if (!input.patch || typeof input.patch!=='object' || Array.isArray(input.patch)) throw fail('Invalid state.');
+      if (Object.keys(input.patch).length>12) throw fail('Use up to 12 state entries.');
+      return json(res,200,{status:setStatus(dirs,input.patch)});
     }
     if (req.method==='DELETE' && url.pathname==='/api/recall') {
       const input=await body(req);
