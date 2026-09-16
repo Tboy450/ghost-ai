@@ -33,8 +33,13 @@ export function currentBranch(root) {
 export function status(root) {
   ensureRepo(root);
   const result = run(root, ['status', '--porcelain=v1']);
+  // Porcelain gives two columns: the first is the index (staged) state, the second the
+  // working tree. Trimming the pair together loses which side a letter came from, so an
+  // unstaged " M" and a staged "M " both look like "M". Both columns are kept verbatim.
   const files = result.stdout.split('\n').filter(Boolean).map(line => ({
     status: line.slice(0, 2).trim(),
+    index: line[0],
+    work: line[1],
     path: line.slice(3).replace(/^"|"$/g, ''),
   }));
   return {branch: currentBranch(root), clean: files.length === 0, files};
@@ -185,7 +190,7 @@ export function reviewChanges(root) {
     return {
       path: file.path,
       change,
-      staged: file.status[0] !== ' ' && file.status !== '??',
+      staged: file.index !== ' ' && file.index !== '?',
       binary,
       lines,
       notes: notes.slice(0, 6),
@@ -223,26 +228,65 @@ export function log(root, limit = 25) {
   });
 }
 
-export function commit(root, message, {authorName = 'Ghost', authorEmail = 'ghost@local'} = {}) {
+// Committing must include exactly what the user chose and nothing else. `git add -A`
+// followed by a plain commit sweeps up every unrelated edit in the folder, and anything
+// the user had already staged for a different commit. `commit --only` restricts the
+// commit to the named paths and leaves the rest of the index untouched.
+export function commit(root, message, {authorName = 'Ghost', authorEmail = 'ghost@local', files} = {}) {
   ensureRepo(root);
   if (typeof message !== 'string' || !message.trim()) throw fail('Write a commit message.');
-  run(root, ['add', '-A']);
-  const staged = run(root, ['diff', '--cached', '--name-only']);
-  if (!staged.stdout.trim()) throw fail('There is nothing to commit.', 409);
-  const result = run(root, ['-c', `user.name=${authorName}`, '-c', `user.email=${authorEmail}`, 'commit', '-m', message]);
-  if (result.status !== 0) throw fail(result.stderr || 'Commit failed.', 500);
-  return {hash: currentHash(root)};
+  const identity = ['-c', `user.name=${authorName}`, '-c', `user.email=${authorEmail}`];
+
+  const chosen = Array.isArray(files) ? files.filter(file => typeof file === 'string' && file.trim()) : null;
+  if (Array.isArray(files) && !chosen.length) throw fail('Choose at least one file to commit.');
+
+  if (!chosen) {
+    run(root, ['add', '-A']);
+    const staged = run(root, ['diff', '--cached', '--name-only']);
+    if (!staged.stdout.trim()) throw fail('There is nothing to commit.', 409);
+    const result = run(root, [...identity, 'commit', '-m', message]);
+    if (result.status !== 0) throw fail(result.stderr || 'Commit failed.', 500);
+    return {hash: currentHash(root), files: staged.stdout.trim().split('\n')};
+  }
+
+  const specs = chosen.map(file => `:(top,literal)${file}`);
+  // A file git has never seen cannot be named in `commit --only`, so record the intent
+  // to add it first. This stages no content and is undone by the commit itself.
+  run(root, ['add', '-N', '--', ...specs]);
+  const changed = run(root, ['status', '--porcelain=v1', '--', ...specs]);
+  if (!changed.stdout.trim()) throw fail('Those files have no changes to commit.', 409);
+  const result = run(root, [...identity, 'commit', '--only', '-m', message, '--', ...specs]);
+  if (result.status !== 0) throw fail(result.stderr || result.stdout || 'Commit failed.', 500);
+  return {hash: currentHash(root), files: chosen};
 }
 
 export function currentHash(root) {
   return run(root, ['rev-parse', 'HEAD']).stdout.trim();
 }
 
+// Push failures are the ones users hit most often, and raw git output ("fatal: 'origin'
+// does not appear to be a git repository") reads as a crash rather than a next step.
+// Each known failure is translated into a sentence that says what to do about it.
+function pushProblem(text, remote, branch) {
+  const lower = text.toLowerCase();
+  if (lower.includes('does not appear to be a git repository') || lower.includes('no configured push destination') || lower.includes('no such remote'))
+    return `This project has no remote called "${remote}" yet, so there is nowhere to push. Add one with: git remote add ${remote} <url>`;
+  if (lower.includes('non-fast-forward') || lower.includes('fetch first') || lower.includes('behind its remote'))
+    return `The remote has commits that ${branch} does not. Pull those in first, then push again.`;
+  if (lower.includes('authentication failed') || lower.includes('could not read username') || lower.includes('permission denied') || lower.includes('403'))
+    return `The remote refused your sign-in. Check your credentials or access to "${remote}", then push again.`;
+  if (lower.includes('could not resolve host') || lower.includes('failed to connect') || lower.includes('timed out'))
+    return 'Could not reach the remote. Check your connection, then push again.';
+  if (lower.includes('protected branch') || lower.includes('pre-receive hook declined'))
+    return `The remote rejected the push to ${branch}. That branch is protected, so open a pull request instead.`;
+  return text.trim() || 'Push failed. Check your remote and credentials.';
+}
+
 export function push(root, {remote = 'origin', branch} = {}) {
   ensureRepo(root);
   const target = branch || currentBranch(root);
   const result = run(root, ['push', remote, `HEAD:${target}`]);
-  if (result.status !== 0) throw fail(result.stderr || 'Push failed. Check your remote and credentials.', 500);
+  if (result.status !== 0) throw fail(pushProblem(result.stderr || '', remote, target), 400);
   return {remote, branch: target, output: result.stdout.trim() || result.stderr.trim()};
 }
 

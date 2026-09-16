@@ -18,3 +18,5 @@
 .si-diff-body { max-height: 320px; overflow: auto; margin: .5rem 0 0; padding: .6rem .75rem; background: rgba(0,0,0,.25); border-radius: 6px; font-size: .78rem; line-height: 1.45; white-space: pre; }
 
 .review-item{align-items:flex-start}.review-body{display:flex;flex-direction:column;gap:2px;flex:1;min-width:0;text-align:left}.review-body .memory-help{white-space:normal;line-height:1.35}
+
+.review-item{display:flex;align-items:flex-start;gap:8px}.review-pick{margin-top:4px;flex:none;cursor:pointer}.review-open{display:flex;align-items:flex-start;gap:8px;flex:1;min-width:0;text-align:left;padding:0}

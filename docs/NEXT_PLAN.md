@@ -5,7 +5,7 @@
 Tick these off as they land. Each needs a dated row in
 `docs/IMPLEMENTATION_CHECKLIST.md` with the real result before it counts as done.
 
-### Step 7 — Git integration (next)
+### Step 7 — Git integration (done)
 
 `studio/git.mjs` already does worktrees, branches, commits, pushes and diffing, because
 self-update needed them. What is missing is everything the user touches.
@@ -14,15 +14,15 @@ self-update needed them. What is missing is everything the user touches.
       with times, and return to one. Must survive a restart.
 - [x] **Readable change review.** What changed, in summary form — files touched, what
       each change does — not a raw diff wall. The diff stays available underneath.
-- [ ] **Commit and push from the UI.** Show the branch and the exact file list before
+- [x] **Commit and push from the UI.** Show the branch and the exact file list before
       anything happens. Never stage unrelated edits.
 - [x] **Restore.** Return to a checkpoint and confirm the tree matches, with a clear
       warning about what will be discarded. Ghost saves a safety checkpoint of the
       current state first, so any restore can itself be undone.
-- [ ] **Failure cases tested live.** No remote configured, rejected push, dirty tree,
+- [x] **Failure cases tested live.** No remote configured, rejected push, dirty tree,
       conflict on restore. Each must give a readable message, not raw git output.
 
-### Step 9 — Comparisons
+### Step 9 — Comparisons (next)
 
 - [ ] **Real scoring.** Matched questions, recorded configuration, actual correctness,
       recall, latency and memory use. Build on `scripts/bench_memory.mjs`.

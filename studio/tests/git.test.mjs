@@ -439,3 +439,111 @@ test('the review leaves out harness names that say nothing about the change', ()
     assert.match(suite.summary, /1 line added/);
   } finally { fs.rmSync(repo, {recursive: true, force: true}); }
 });
+
+function committedFiles(repo) {
+  return spawnSync('git', ['show', '--name-only', '--format=', 'HEAD'], {cwd: repo, encoding: 'utf8'}).stdout.trim().split('\n').filter(Boolean);
+}
+
+// `git add -A` then commit sweeps up every unrelated edit in the folder. If you are
+// halfway through a second change, it ends up in a commit you did not intend.
+test('committing chosen files leaves the other changes alone', () => {
+  const repo = makeRepo();
+  try {
+    fs.writeFileSync(path.join(repo, 'a.md'), 'the change I meant to commit\n');
+    fs.writeFileSync(path.join(repo, 'half-finished.md'), 'not ready yet\n');
+
+    const result = git.commit(repo, 'just the one file', {files: ['a.md']});
+    assert.deepEqual(committedFiles(repo), ['a.md']);
+    assert.deepEqual(result.files, ['a.md']);
+
+    const after = git.status(repo);
+    const leftover = after.files.find(f => f.path === 'half-finished.md');
+    assert.ok(leftover, 'the unfinished file must still be sitting there, uncommitted');
+    assert.equal(fs.readFileSync(path.join(repo, 'half-finished.md'), 'utf8'), 'not ready yet\n');
+  } finally { fs.rmSync(repo, {recursive: true, force: true}); }
+});
+
+test('committing chosen files does not take what was staged for something else', () => {
+  const repo = makeRepo();
+  try {
+    fs.writeFileSync(path.join(repo, 'staged-for-later.md'), 'deliberately staged\n');
+    spawnSync('git', ['add', 'staged-for-later.md'], {cwd: repo});
+    fs.writeFileSync(path.join(repo, 'a.md'), 'the change I meant to commit\n');
+
+    git.commit(repo, 'just the one file', {files: ['a.md']});
+    assert.deepEqual(committedFiles(repo), ['a.md']);
+
+    const stillStaged = spawnSync('git', ['diff', '--cached', '--name-only'], {cwd: repo, encoding: 'utf8'}).stdout.trim();
+    assert.equal(stillStaged, 'staged-for-later.md', 'what the user staged must survive the commit, still staged');
+  } finally { fs.rmSync(repo, {recursive: true, force: true}); }
+});
+
+test('a brand-new file can be committed by name', () => {
+  const repo = makeRepo();
+  try {
+    fs.writeFileSync(path.join(repo, 'brand-new.md'), 'never committed before\n');
+    fs.writeFileSync(path.join(repo, 'a.md'), 'also changed\n');
+    git.commit(repo, 'the new file only', {files: ['brand-new.md']});
+    assert.deepEqual(committedFiles(repo), ['brand-new.md']);
+    assert.ok(git.status(repo).files.some(f => f.path === 'a.md'), 'the other edit stays uncommitted');
+  } finally { fs.rmSync(repo, {recursive: true, force: true}); }
+});
+
+test('committing files with no changes says so instead of failing obscurely', () => {
+  const repo = makeRepo();
+  try {
+    fs.writeFileSync(path.join(repo, 'b.md'), 'changed\n');
+    assert.throws(() => git.commit(repo, 'nothing here', {files: ['a.md']}), e => e.status === 409 && /no changes/i.test(e.message));
+    assert.throws(() => git.commit(repo, 'nothing chosen', {files: []}), e => /Choose at least one file/.test(e.message));
+  } finally { fs.rmSync(repo, {recursive: true, force: true}); }
+});
+
+// Live check: the review marked every changed file as "staged" because status() trimmed
+// the two porcelain columns together, so an unstaged " M" was indistinguishable from a
+// staged "M ". The index and working-tree columns are now kept apart.
+test('only files actually staged are reported as staged', () => {
+  const repo = makeRepo();
+  try {
+    fs.writeFileSync(path.join(repo, 'a.md'), 'edited but not staged\n');
+    fs.writeFileSync(path.join(repo, 'b.md'), 'edited and staged\n');
+    spawnSync('git', ['add', 'b.md'], {cwd: repo, encoding: 'utf8'});    const review = git.reviewChanges(repo);
+    const byPath = Object.fromEntries(review.files.map(f => [f.path, f]));
+    assert.equal(byPath['a.md'].staged, false, 'an unstaged edit must not claim to be staged');
+    assert.equal(byPath['b.md'].staged, true);
+  } finally { fs.rmSync(repo, {recursive: true, force: true}); }
+});
+
+// Live check: pushing with no remote returned git's raw "fatal: 'origin' does not appear
+// to be a git repository", which reads as a crash. Failures say what to do instead.
+test('a push with no remote explains what to do', () => {
+  const repo = makeRepo();
+  try {
+    assert.throws(() => git.push(repo), e => e.status === 400 && /no remote called "origin"/.test(e.message) && !/fatal:/.test(e.message));
+  } finally { fs.rmSync(repo, {recursive: true, force: true}); }
+});
+
+// Live check: when someone else has pushed first, git reports "non-fast-forward" plus a
+// wall of hint text. The user is told to pull instead.
+test('a rejected push tells you to pull first', () => {
+  const repo = makeRepo();
+  const bare = fs.mkdtempSync(path.join(os.tmpdir(), 'ghost-remote-'));
+  const other = fs.mkdtempSync(path.join(os.tmpdir(), 'ghost-other-'));
+  const at = (dir, args) => spawnSync('git', args, {cwd: dir, encoding: 'utf8'});
+  try {
+    spawnSync('git', ['init', '-q', '--bare', bare], {encoding: 'utf8'});
+    at(repo, ['remote', 'add', 'origin', bare]);
+    const branch = git.currentBranch(repo);
+    at(repo, ['push', '-q', 'origin', `HEAD:${branch}`]);
+    at(other, ['clone', '-q', bare, '.']);
+    at(other, ['config', 'user.email', 'other@local']);
+    at(other, ['config', 'user.name', 'Other']);
+    fs.writeFileSync(path.join(other, 'a.md'), 'their version\n');
+    at(other, ['commit', '-aqm', 'theirs']);
+    at(other, ['push', '-q', 'origin', `HEAD:${branch}`]);
+    fs.writeFileSync(path.join(repo, 'a.md'), 'my version\n');
+    at(repo, ['commit', '-aqm', 'mine']);
+    assert.throws(() => git.push(repo), e => /pull those in first/i.test(e.message) && !/hint:/i.test(e.message));
+  } finally {
+    for (const dir of [repo, bare, other]) fs.rmSync(dir, {recursive: true, force: true});
+  }
+});
