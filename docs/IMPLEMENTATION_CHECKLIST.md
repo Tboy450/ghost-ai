@@ -142,3 +142,4 @@ the remote commit is verified.
 Update this file whenever a roadmap item is attempted, completed, or blocked.
 | 2026-09-15 | Step 7d algorithm pockets | Passed | `node --test studio/tests/*.test.mjs` — 61/61 passed (15 new archive tests) |
 | 2026-09-15 | Step 7d project-lock regression | Fixed | Per-operation open/close; API test project-switch `EPERM` resolved and covered by a dedicated test |
+| 2026-09-15 | Step 7d live cross-conversation recall | Passed | Running server: a decision made in one conversation reached the model in a second, unrelated conversation; `/api/recall` search, expansion, and per-conversation forget verified — 62/62 |

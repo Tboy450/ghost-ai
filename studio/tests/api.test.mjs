@@ -87,3 +87,54 @@ test('API streams and persists chat, protects writes, and saves both comparison 
     fs.rmSync(resolved,{recursive:true,force:true});
   }
 });
+
+test('the studio recalls a decision made in an earlier conversation', {timeout:30000}, async()=>{
+  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'ghost-recall-'));
+  const requests=[];
+  const fake=http.createServer(async(req,res)=>{
+    if(req.url==='/api/tags'){res.setHeader('Content-Type','application/json');return res.end(JSON.stringify({models:[{name:'test-local',digest:'fixture-only',size:1}]}));}
+    let input='';for await(const chunk of req)input+=chunk;
+    requests.push(JSON.parse(input));
+    res.setHeader('Content-Type','application/x-ndjson');
+    res.end(JSON.stringify({message:{content:'Noted.'},done:true,eval_count:4,prompt_eval_count:20,total_duration:1e8,eval_duration:5e7})+'\n');
+  });
+  await new Promise(resolve=>fake.listen(0,'127.0.0.1',resolve));
+  const probe=http.createServer();await new Promise(resolve=>probe.listen(0,'127.0.0.1',resolve));const port=probe.address().port;await new Promise(resolve=>probe.close(resolve));
+  const appPath=fileURLToPath(new URL('../server.mjs',import.meta.url));
+  const child=spawn(process.execPath,[appPath],{env:{...process.env,STUDIO_PORT:String(port),STUDIO_DATA_DIR:dir,STUDIO_OLLAMA_URL:`http://127.0.0.1:${fake.address().port}`},stdio:['ignore','pipe','pipe']});
+  const origin=`http://127.0.0.1:${port}`;
+  try{
+    await Promise.race([once(child.stdout,'data'),new Promise((_,reject)=>child.once('exit',code=>reject(new Error(`Server exited ${code}`))))]);
+    const boot=await fetch(origin+'/api/bootstrap').then(r=>r.json());
+    const headers={'Content-Type':'application/json','X-Studio-Token':boot.token,Origin:origin};
+    const request=(url,body,method='POST',extra={})=>fetch(origin+url,{method,headers:{...headers,...extra},body:JSON.stringify(body)});
+    const first=await request('/api/sessions',{}).then(r=>r.json());
+    await request('/api/chat',{sessionId:first.id,model:'test-local',framework:false,profile:'balanced',
+      prompt:'We decided to store every conversation as JSONL because rewriting one large JSON file kept corrupting the history.'}).then(r=>r.text());
+
+    // A brand new conversation cannot see the first transcript, so anything it
+    // recalls has to have come back out of the long-term archive.
+    const second=await request('/api/sessions',{}).then(r=>r.json());
+    const stream=await request('/api/chat',{sessionId:second.id,model:'test-local',framework:false,profile:'balanced',
+      prompt:'Remind me why the history is written as jsonl rather than one json file?'}).then(r=>r.text());
+    const context=stream.trim().split('\n').map(JSON.parse).find(e=>e.type==='context');
+    assert.ok(context.stats.recalled.length>=1,'expected a pocket from the earlier conversation');
+    const sent=requests.at(-1).messages[0].content.toLowerCase();
+    assert.ok(sent.includes('jsonl'),'the recalled decision should reach the model');
+    assert.ok(sent.includes('corrupt'),'the reason, not just the keyword, should survive');
+
+    const stats=await fetch(origin+'/api/recall').then(r=>r.json());
+    assert.ok(stats.pockets>=1);
+    const searched=await fetch(origin+'/api/recall?q=jsonl').then(r=>r.json());
+    assert.ok(searched.results.length>=1);
+    const opened=await fetch(origin+`/api/recall?pocket=${searched.results[0].id}`).then(r=>r.json());
+    assert.ok(opened.text.toLowerCase().includes('jsonl'));
+    assert.equal((await request('/api/recall',{conversation:first.id},'DELETE')).status,200);
+    const afterForget=await fetch(origin+'/api/recall?q=jsonl').then(r=>r.json());
+    assert.ok(afterForget.results.every(r=>r.conversation!==first.id),'forgetting a conversation removes only its own pockets');
+  }finally{
+    child.kill();await once(child,'exit').catch(()=>{});
+    await new Promise(resolve=>fake.close(resolve));
+    fs.rmSync(fs.realpathSync(dir),{recursive:true,force:true});
+  }
+});
