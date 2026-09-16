@@ -18,3 +18,34 @@
 .reflex-row p{font-size:11px;line-height:1.7;color:#aebbb0;margin:0}
 .memory-card.pocket.digest{border-left-color:#5b6f4c}
 @media(max-width:580px){.depth-bar{grid-template-columns:repeat(2,1fr)}.reflex-add{grid-template-columns:1fr}}
+/* Browser relay: four steps, locked until the previous one is satisfied, so the order
+   is obvious without needing instructions. */
+.relay-view{padding:0 30px 30px;overflow:auto}
+.relay-steps{list-style:none;padding:0;margin:20px 0;counter-reset:relay}
+.relay-step{background:#22272a;border:1px solid #363f3b;border-radius:8px;padding:18px;margin:12px 0}
+.relay-step.locked{opacity:.4;pointer-events:none}
+.relay-step h3{font-size:12px;font-weight:500;margin:0 0 8px}
+.relay-step textarea{width:100%;background:#202528;border:1px solid #39413e;color:#c5d0c1;border-radius:7px;padding:13px;display:block;margin:12px 0;font-size:11px;line-height:1.7;font-family:ui-monospace,Consolas,monospace}
+.relay-start,.relay-run,.relay-actions{display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap}
+.relay-start label,.relay-run label{font-size:8px;letter-spacing:1px;color:var(--muted);flex:1 1 180px}
+.relay-start select,.relay-start input,.relay-run select{display:block;margin-top:8px;width:100%;background:#202528;border:1px solid #39413e;color:#c5d0c1;border-radius:7px;padding:10px;font-size:11px}
+.relay-actions a.secondary-button{text-decoration:none;display:inline-flex;align-items:center}
+.relay-counts{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin:14px 0}
+.relay-counts .memory-help{grid-column:1/-1}
+.relay-segments{max-height:340px;overflow:auto;margin:10px 0}
+.relay-segment{display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;padding:10px 12px;border:1px solid #353f39;border-left:2px solid #4a544e;border-radius:7px;margin:6px 0;background:#202526}
+.relay-segment small{font-size:9px;color:var(--muted);font-family:ui-monospace,Consolas,monospace}
+.relay-segment strong{font-size:9px;font-weight:400;letter-spacing:.6px;text-transform:uppercase;color:var(--muted)}
+.relay-segment p{grid-column:1/-1;font-size:10px;color:#b08a6a;margin:4px 0 0;line-height:1.6}
+.relay-segment.done{border-left-color:#8fb46e}
+.relay-segment.done strong{color:#8fb46e}
+.relay-segment.kept{border-left-color:#6f8f5a}
+.relay-segment.skipped{border-left-color:#b07a4a}
+.relay-segment.skipped strong{color:#b08a6a}
+.relay-outcome{border:1px solid #353f39;border-left:2px solid #8fb46e;border-radius:7px;padding:14px;margin:12px 0;background:#202526}
+.relay-outcome.bad{border-left-color:#b07a4a}
+.relay-outcome strong{display:block;font-size:12px;font-weight:500;color:#c4d6b9;margin-bottom:8px}
+.relay-outcome p{font-size:11px;line-height:1.7;color:#aebbb0;margin:4px 0}
+.relay-outcome small{font-size:9px;color:var(--muted);font-family:ui-monospace,Consolas,monospace}
+.relay-log{font-size:10px;line-height:1.6;color:#aebbb0;background:#1b2022;border:1px solid #353f39;border-radius:6px;padding:10px;overflow:auto;max-height:200px;white-space:pre-wrap;margin:8px 0 0}
+@media(max-width:580px){.relay-view{padding:0 20px 25px}.relay-counts{grid-template-columns:repeat(2,1fr)}}

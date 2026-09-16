@@ -151,6 +151,36 @@ committed/pushed.
 - Set the focus/queue and pick a provider in the Self-improve view, then "Run one cycle." Review
   the report, and merge the `ghost/self-update` branch yourself once you're happy with it.
 
+## Browser relay — self-improvement without an API key
+
+The **Relay** view does the same job as Self-improve, but the public AI is reached by *you*, in
+a browser tab you are already signed into. No API key, no billing, no account wiring.
+
+It is four steps, and each one unlocks only when the previous is satisfied:
+
+1. **Start** — pick a chat (ChatGPT, Grok, DeepSeek, Gemini, Claude, Copilot, Meta, or LMArena)
+   and optionally type a focus. Ghost writes a prompt containing the project's file list.
+2. **Copy and paste** — copy that prompt, open the chat, and paste it. The prompt deliberately
+   asks for a **short plan in plain words, never code**: a browser chat handles a plan where it
+   cannot handle a large diff, and its judgement is the thing worth borrowing.
+3. **Paste the plan back** — Ghost cuts it into small segments. If the plan begins with a
+   `FILES:` line, only those files are in scope, so the public AI cannot quietly aim the run at
+   the test suite.
+4. **Run and apply** — Ghost's own local model rewrites the code **one bounded segment at a
+   time**, because a 4B model asked to rewrite a large module will truncate and invent. Progress
+   streams in as each segment finishes.
+
+Every rule here exists to stop a local model from getting *stuck*, which is its real failure
+mode rather than slowness: there is a hard per-segment deadline, one attempt and one retry and
+never more, and the output is checked for the known stuck shapes (empty, no code block, collapsed
+below 40% of the original, ballooned past 3×, one line repeating). A segment that fails any of
+these is **skipped and recorded with the reason**, and falls back to its original text so the
+file still assembles intact.
+
+Applying uses the same safety path as an API cycle: a disposable worktree, the full test suite,
+and a commit only on green. Nothing that came out of a browser or a small local model touches
+your real checkout untested.
+
 ## Edit the source
 
 - Main backend: `studio/server.mjs`

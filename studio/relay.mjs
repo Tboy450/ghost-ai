@@ -32,7 +32,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { addWorktree, removeWorktree, stageIntentToAdd, commit, push, diff } from './git.mjs';
-import { gatherContext, applyProposal, isProtectedPath, runTests, getFocus, advanceFocus } from './selfimprove.mjs';
+import { gatherContext, applyProposal, isProtectedPath, runTests, getFocus, advanceFocus, buildRepoSummary } from './selfimprove.mjs';
 import { modelComplete } from './core.mjs';
 
 function fail(message, status = 400) { return Object.assign(new Error(message), {status}); }
@@ -83,17 +83,32 @@ export function splitIntoSegments(content, budget = SEGMENT_BUDGET) {
 // never asked to touch, and a rewrite of a test is how a red suite gets made green
 // dishonestly. Unparseable or unmatched names fall back to the search result, since a
 // person's paste should never leave the relay with nothing to do.
-export function scopeFiles(files, guidance) {
+export function wantedFiles(guidance) {
   const line = /^\s*FILES\s*:\s*(.+)$/im.exec(guidance || '');
-  if (!line) return files;
-  const wanted = line[1].split(/[,\s]+/).map(s => s.trim().replace(/^['"`]|['"`.]$/g, '')).filter(Boolean);
+  if (!line) return [];
+  return line[1].split(/[,\s]+/).map(s => s.trim().replace(/^['"`]|['"`.]$/g, '')).filter(Boolean);
+}
+
+const matchesName = (filePath, name) => filePath === name || filePath.endsWith(`/${name}`) || name.endsWith(`/${filePath}`);
+
+export function scopeFiles(files, guidance) {
+  const wanted = wantedFiles(guidance);
   if (!wanted.length) return files;
-  const picked = files.filter(f => wanted.some(w => f.path === w || f.path.endsWith(`/${w}`) || w.endsWith(`/${f.path}`)));
+  const picked = files.filter(f => wanted.some(w => matchesName(f.path, w)));
   return picked.length ? picked : files;
 }
 
 export function planSegments(root, focus, {budget = SEGMENT_BUDGET, maxFiles = 6, maxSegments = MAX_SEGMENTS, guidance = null} = {}) {
-  const files = scopeFiles(gatherContext(root, focus, {budget: 40000, maxFiles}), guidance);
+  // A file the plan names has to be loaded even when relevance ranking would not have
+  // reached it. Scoping only the ranked shortlist dropped the named file and then fell
+  // back to every other file instead, so the plan said "edit app.js" and the relay
+  // queued up the test suite.
+  const wanted = wantedFiles(guidance);
+  const named = wanted.length ? buildRepoSummary(root).filter(f => wanted.some(w => matchesName(f, w))) : [];
+  const options = named.length
+    ? {budget: 40000, maxFiles: Math.max(maxFiles, named.length), files: named}
+    : {budget: 40000, maxFiles};
+  const files = scopeFiles(gatherContext(root, focus, options), guidance);
   const segments = [];
   for (const file of files) {
     const pieces = splitIntoSegments(file.content, budget);
@@ -260,7 +275,11 @@ export function relayState(dirs, loaded) {
   return {
     open: true, id: run.id, chat: run.chat, focus: run.focus, chats: BROWSER_CHATS,
     url: BROWSER_CHATS.find(c => c.id === run.chat)?.url || null,
-    brief: run.brief, guidance: run.guidance, files: run.files,
+    // Before a plan arrives this is the candidate list the brief showed. Afterwards the
+    // honest answer is what the plan actually scoped, which can be a file the candidate
+    // list never contained.
+    brief: run.brief, guidance: run.guidance,
+    files: run.segments.length ? [...new Set(run.segments.map(s => s.path))] : run.files,
     total: run.segments.length, counts,
     segments: run.segments.map((s, index) => ({index, path: s.path, part: s.part, parts: s.parts, state: s.state, note: s.note})),
     changedFiles: assembleFiles(run).map(f => f.path),

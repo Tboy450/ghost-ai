@@ -37,6 +37,31 @@ test('the plan\'s FILES list decides what may be rewritten', () => {
   assert.equal(scopeFiles(found, 'FILES: nothing/that/exists.mjs').length, 3);
 });
 
+test('a named file is loaded even when relevance ranking would not reach it', () => {
+  const {root, cleanup} = gitProject();
+  try {
+    // Fill the shortlist with files that all out-rank the target for this focus, so the
+    // only way the named file gets in is by being resolved against the whole repo first.
+    for (let i = 0; i < 10; i++) fs.writeFileSync(path.join(root, 'studio', `toast${i}.mjs`), `export const toast${i} = ${i};\n`);
+    fs.writeFileSync(path.join(root, 'studio', 'quiet.mjs'), 'export const quiet = true;\n');
+    const ranked = planSegments(root, 'toast', {maxFiles: 6, guidance: 'PLAN:\n- do a thing'});
+    assert.ok(!ranked.some(s => s.path === 'studio/quiet.mjs'), 'the unrelated file should not rank on its own');
+    const scoped = planSegments(root, 'toast', {maxFiles: 6, guidance: 'FILES: studio/quiet.mjs\nPLAN:\n- do a thing'});
+    assert.deepEqual([...new Set(scoped.map(s => s.path))], ['studio/quiet.mjs'],
+      'naming a file in the plan must load exactly that file, not fall back to the ranked list');
+  } finally { cleanup(); }
+});
+
+test('the reported scope is what the plan chose, not the candidate list', () => {
+  const {root, dirs, cleanup} = gitProject();
+  try {
+    startRelay(dirs, {codeRoot: root, chat: 'grok', focus: 'widget'});
+    const state = submitGuidance(dirs, {codeRoot: root, guidance: 'FILES: studio/widget.mjs\nPLAN:\n- adjust the size constant'});
+    assert.deepEqual(state.files, ['studio/widget.mjs'],
+      'the scope shown to the person must match the segments actually queued');
+  } finally { cleanup(); }
+});
+
 test('a file is split on line boundaries, never mid-line', () => {
   const content = Array.from({length: 40}, (_, i) => `const line${i} = ${i};`).join('\n');
   const segments = splitIntoSegments(content, 200);

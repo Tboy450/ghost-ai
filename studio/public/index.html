@@ -18,6 +18,7 @@
         <button class="nav-item" data-view="activity"><span class="nav-icon">◷</span> Activity</button>
         <button class="nav-item" data-view="git"><span class="nav-icon">⎇</span> Git</button>
         <button class="nav-item" data-view="selfimprove"><span class="nav-icon">✦</span> Self-improve</button>
+        <button class="nav-item" data-view="relay"><span class="nav-icon">⇄</span> Relay</button>
       </nav>
       <div class="section-label">RECENT <span id="session-count">0</span></div>
       <div id="sessions" class="sessions"></div>
@@ -93,6 +94,46 @@
         <div id="si-providers" class="si-providers"></div>
         <h3 class="memory-title">Cycle history</h3>
         <div id="si-history" class="si-history"></div>
+      </section>
+      <section id="relay-view" class="view relay-view hidden">
+        <div class="view-heading"><span class="eyebrow">BORROW A PUBLIC AI. NO KEY REQUIRED.</span><h1>Two pastes, then Ghost does the work.</h1><p>You are probably already signed in to ChatGPT, Grok, DeepSeek or Gemini in a browser tab. Ghost writes the prompt, you paste it there and paste the plan back. Ghost's own local model then does the editing, one small piece at a time. Nothing reaches your project until the whole test suite passes.</p></div>
+        <ol class="relay-steps">
+          <li class="relay-step" id="relay-step-1">
+            <h3>1 · Pick a chat and a focus</h3>
+            <div class="relay-start">
+              <label>PUBLIC CHAT<select id="relay-chat" aria-label="Public chat"></select></label>
+              <label>FOCUS<input id="relay-focus" type="text" placeholder="Leave blank to use the saved self-improve focus"></label>
+              <button id="relay-start" class="primary-button">Start relay</button>
+            </div>
+          </li>
+          <li class="relay-step locked" id="relay-step-2">
+            <h3>2 · Copy this into the chat</h3>
+            <p class="memory-help">Ghost asks for a short plan in plain words, not code. A browser chat handles a plan far better than a large diff.</p>
+            <textarea id="relay-brief" rows="10" readonly aria-label="Prompt to paste into the public chat"></textarea>
+            <div class="relay-actions">
+              <button id="relay-copy" class="secondary-button">Copy prompt</button>
+              <a id="relay-open" class="secondary-button" target="_blank" rel="noopener noreferrer">Open the chat</a>
+            </div>
+          </li>
+          <li class="relay-step locked" id="relay-step-3">
+            <h3>3 · Paste the plan back</h3>
+            <p class="memory-help">Paste the whole reply. Ghost reads the <code>FILES:</code> line to decide what it is allowed to touch.</p>
+            <textarea id="relay-guidance" rows="8" placeholder="FILES: studio/server.mjs&#10;PLAN:&#10;- ..." aria-label="Plan from the public chat"></textarea>
+            <button id="relay-submit" class="primary-button">Use this plan</button>
+          </li>
+          <li class="relay-step locked" id="relay-step-4">
+            <h3>4 · Let the local model work</h3>
+            <div class="relay-run">
+              <label>LOCAL MODEL<select id="relay-model" aria-label="Local model"></select></label>
+              <button id="relay-implement" class="primary-button">Implement segments</button>
+              <button id="relay-apply" class="secondary-button">Apply &amp; test</button>
+              <button id="relay-clear" class="secondary-button">Discard relay</button>
+            </div>
+            <div id="relay-counts" class="relay-counts"></div>
+            <div id="relay-segments" class="relay-segments"></div>
+            <div id="relay-result" class="relay-result"></div>
+          </li>
+        </ol>
       </section>
       <section id="memory-view" class="view memory-view hidden"><div class="view-heading"><span class="eyebrow">LESS WEIGHT. MORE CONTEXT.</span><h1>Keep the thread.</h1><p>Ghost itemizes older context, recalls what fits this request, and keeps your complete conversation on disk.</p></div><div class="memory-control"><label>MEMORY PROFILE<select id="memory-profile"><option value="auto" selected>Auto · fits the smallest profile that works</option><option value="eco">Eco · 4K context</option><option value="balanced">Balanced · 8K context</option><option value="deep">Deep · 12K context</option></select></label><p>Smaller context uses less memory. Larger context keeps more detail, with additional processing time.</p></div><div id="memory-stats" class="memory-stats"><span>Start a conversation to see what Ghost keeps in view.</span></div><h3 class="memory-title">Pinned notes</h3><p class="memory-help">Keep essential requirements close. One note per line; up to 12 notes.</p><textarea id="pinned-notes" aria-label="Pinned memory notes" placeholder="Example: This project uses Python and must work offline." rows="4"></textarea><button id="save-memory" class="primary-button">Save notes</button><h3 class="memory-title">Depths of recall</h3><p class="memory-help">Recall runs as layers, cheapest first, and stops as soon as it has enough. An ordinary follow-up never opens the archive.</p><div id="depth-bar" class="depth-bar"></div><h3 class="memory-title">Standing rules</h3><p class="memory-help">Rules Ghost carries into every turn without searching for them. Leave the trigger blank to make a rule unconditional; give it one to keep the rule silent until that subject comes up.</p><div class="reflex-add"><input id="reflex-text" type="text" placeholder="Example: Never add a build step." maxlength="400" aria-label="Standing rule"><input id="reflex-trigger" type="text" placeholder="Trigger (optional)" maxlength="200" aria-label="Rule trigger"><button id="add-reflex" class="primary-button">Add rule</button></div><div id="reflex-list"></div><button id="learn-reflexes" class="ghost-button">Learn rules from history</button><h3 class="memory-title">Recalled context</h3><div id="recalled-context"></div></section>
       <footer class="statusbar"><span><span class="tiny-dot"></span> Local workspace</span><span id="footer-status">Ready</span><span>⌘ <span id="file-total">1,902 source files</span></span></footer>
