@@ -4,7 +4,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { readFile, saveFile, safeFile, listFiles, searchProject, modelStream } from '../core.mjs';
-import { packContext, packAdaptive, itemize, estimateTokens, relevantFile, PROFILES } from '../memory.mjs';
+import { packContext, packAdaptive, itemize, estimateTokens, relevantFile, PROFILES, chipProfileFor } from '../memory.mjs';
+import { CHIP_PROFILES } from '../ram.mjs';
 
 test('file saves create an exact backup and reject stale writes',()=>{
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'ghost-files-'));
@@ -67,6 +68,18 @@ test('relevant file excerpts have source line numbers and a bounded size',()=>{
   assert.ok(selected.text.includes('301: function launchSpaceship'));
   assert.ok(estimateTokens(selected.text)<=400);
   assert.equal(selected.partial,true);
+});
+
+test('the chip size follows the context profile it feeds',()=>{
+  // The chat path used to hold this at 'medium' for every turn because nothing ever set
+  // it, so Eco spent prompt it could not afford and Deep under-used the room it had.
+  assert.equal(chipProfileFor('eco'),'small');
+  assert.equal(chipProfileFor('balanced'),'medium');
+  assert.equal(chipProfileFor('deep'),'large');
+  // Every memory profile must map to a real chip, or a new profile silently downgrades.
+  for(const profile of Object.keys(PROFILES)) assert.ok(CHIP_PROFILES[chipProfileFor(profile)],`${profile} must map to a real chip`);
+  assert.equal(chipProfileFor('auto'),'medium','an unresolved profile falls back rather than throwing');
+  assert.equal(chipProfileFor(undefined),'medium');
 });
 
 test('each profile reserves output and keeps the latest request unchanged',()=>{

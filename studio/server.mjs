@@ -4,7 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { listFiles, readFile, saveFile, searchProject, modelStream, BASE_PROMPT } from './core.mjs';
-import { packContext, packAdaptive, PROFILES } from './memory.mjs';
+import { packContext, packAdaptive, PROFILES, chipProfileFor } from './memory.mjs';
 import { rememberConversation, forgetConversation, recall, archiveStats, expandPocket, buildLinks } from './archive.mjs';
 import { recallLayered, memoryState, parseRequests, addReflex, removeReflex, readReflexes, learnReflexes, setStatus, readStatus } from './recall.mjs';
 import { openProject, listProjects, activeProject, switchProject, closeProject, ensureProjectDirs } from './projects.mjs';
@@ -106,8 +106,13 @@ async function chat(req,res,input) {
       // Addresses the model asked for last turn are honoured first, so a request to see a
       // digest in full survives the turn boundary instead of evaporating with the answer.
       const asked=parseRequests(session.messages.filter(m=>m.role==='assistant').slice(-1)[0]?.content || '');
+      // Recall runs before packing, so on 'auto' the profile this turn resolves to is not
+      // known yet; the previous turn's choice is the best available estimate and is stable
+      // in practice, because conversations grow rather than shrink.
+      const chipProfile = session.chipProfile
+        || chipProfileFor(profile === 'auto' ? (session.lastContext?.profile || 'balanced') : profile);
       const layered=recallLayered(dirs,input.prompt,{
-        profile:session.chipProfile || 'medium',
+        profile:chipProfile,
         explicit:asked,
         excludeConversation:session.id,
       });

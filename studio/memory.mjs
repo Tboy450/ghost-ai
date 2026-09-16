@@ -5,6 +5,11 @@ export const PROFILES = {
   balanced: {label:'Balanced', context:8192, output:1400, keepAlive:'10m'},
   deep: {label:'Deep', context:12288, output:2000, keepAlive:'10m'},
 };
+// A chip should scale with the context window it feeds. Without this the chip stayed at
+// `medium` for every turn, so Eco paid for a chip it could not afford to spend prompt on
+// and Deep was handed less recall than it had room for.
+export const CHIP_FOR_PROFILE = {eco: 'small', balanced: 'medium', deep: 'large'};
+export const chipProfileFor = profileName => CHIP_FOR_PROFILE[profileName] || 'medium';
 export const estimateTokens = text => Math.ceil(Buffer.byteLength(text || '', 'utf8') / 3) + 6;
 const STOP = new Set('the a an and or of to in is it this that i you we my for with on be as at from have has do does can would should please just about are was were'.split(' '));
 // Light stemming so paraphrased wording ("databases"/"configuring") still matches its root term.

@@ -162,3 +162,5 @@ Update this file whenever a roadmap item is attempted, completed, or blocked.
 | 2026-09-16 | Relay: reported scope was stale | Fixed | `relayState.files` always returned the brief's candidate list, so the view showed a scope that did not match the segments actually queued |
 | 2026-09-16 | Relay: live API check | Passed | Against a running server: assets serve, eight chats listed, short guidance rejected 400, a real plan scoped to one file into 20 segments, apply with nothing rewritten refused 409, clear returns to closed |
 | 2026-09-16 | Full suite | Passed | `node --test studio/tests/*.test.mjs` - 114/114 passed |
+| 2026-09-16 | Memory: chip size never followed the profile | Fixed | The chat path read `session.chipProfile`, which nothing ever set, so every turn silently used the medium chip; chip size now maps from the context profile (eco/balanced/deep to small/medium/large) and on `auto` uses the previous turn's resolved profile, since recall runs before packing |
+| 2026-09-16 | Full suite | Passed | `node --test studio/tests/*.test.mjs` - 115/115 passed |
