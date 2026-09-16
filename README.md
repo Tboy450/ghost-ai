@@ -50,6 +50,49 @@ By default the memory profile is **Auto**: Ghost tries Eco first and only escala
 
 The Memory panel shows what was recalled. This is fast extractive retrieval, not a guarantee of perfect memory. Critical facts can be pinned. See [architecture](docs/GHOST_ARCHITECTURE.md) and [test results](docs/RESULTS.md).
 
+### Depths of recall
+
+Recall is not one lookup. It is a ladder of five layers, cheapest first, borrowed from how a
+MUD client actually handles a session — triggers fire instantly, structured state rides
+out-of-band, scrollback holds recent text, logs hold everything, and a derived map is
+navigated rather than searched.
+
+| Depth | Layer | What it holds | Cost |
+|---|---|---|---|
+| 0 | Reflex | Standing rules that must never be forgotten | No I/O |
+| 1 | Status | Structured current state — project, focus, task | One small file |
+| 2 | Chip | Resident spans and addressable digests, kept between turns | Memory-resident |
+| 3 | Archive | Keyword search across every pocket ever written | One query + unpack |
+| 4 | Links | Associative map: what else mattered whenever this came up | One graph query |
+
+Ghost stops climbing the moment it has enough, so an ordinary follow-up question never opens
+the archive at all. Depth 4 exists for the opposite case: a genuinely new topic shares no
+keywords with anything on file, which no cache can help with, but it is rarely unrelated to
+the decisions already made — and the map can reach those when the words cannot.
+
+A rule added without a trigger is unconditional and always present. Rules added with a
+trigger stay silent until their subject comes up.
+
+### Compression, and why it is shared
+
+Spans of conversation are compressed into pockets. Pockets used to be compressed
+independently, which caps the ratio at whatever redundancy exists *inside* one span — a flat
+3.9× no matter how much history accumulated. MUD clients solved this decades ago with MCCP:
+hold one compression stream open for the whole session so its dictionary accumulates, and a
+short repetitive line late in the session costs almost nothing.
+
+Pockets cannot hold one stream open — each must be independently openable, in any order,
+years later, or random access is lost. So the accumulated dictionary is made explicit:
+trained across the corpus, stored once, versioned, and handed to the codec at both pack and
+unpack time. A small pocket can then match phrases that only exist in *other* pockets.
+
+Dictionaries are only ever added, never replaced, so pockets written against an older one
+stay readable, and repacking is applied only where the result is strictly smaller. A pocket
+whose dictionary is missing degrades to its digest rather than returning corrupt text.
+
+Run `node scripts/bench_memory.mjs 200` to measure storage ratio and per-turn context cost on
+your own machine.
+
 ## Projects
 
 Ghost can hold multiple projects at once. A project is any folder on disk; its conversations,

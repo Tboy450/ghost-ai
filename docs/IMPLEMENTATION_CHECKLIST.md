@@ -143,3 +143,10 @@ Update this file whenever a roadmap item is attempted, completed, or blocked.
 | 2026-09-15 | Step 7d algorithm pockets | Passed | `node --test studio/tests/*.test.mjs` — 61/61 passed (15 new archive tests) |
 | 2026-09-15 | Step 7d project-lock regression | Fixed | Per-operation open/close; API test project-switch `EPERM` resolved and covered by a dedicated test |
 | 2026-09-15 | Step 7d live cross-conversation recall | Passed | Running server: a decision made in one conversation reached the model in a second, unrelated conversation; `/api/recall` search, expansion, and per-conversation forget verified — 62/62 |
+| 2026-09-15 | Step 7e browser relay | Passed | `node --test studio/tests/relay.test.mjs` - 18/18; FILES: scoping bug found and fixed (a rewrite could otherwise have edited its own test) |
+| 2026-09-15 | Memory: shared dictionary | Passed | MCCP-style trained dictionary in `archive.mjs`; brotli+dictionary probed by round-trip at load, deflate fallback; 411/480 pockets repacked, 3.89x -> 4.12x |
+| 2026-09-15 | Memory: RAM chip | Passed | `node --test studio/tests/ram.test.mjs` - 16/16; tiered resident/digest/packed chip with addresses, faults, and eviction |
+| 2026-09-15 | Memory: thrash fix | Fixed | Chip capacity was smaller than one pocket, so hits were impossible by construction; profiles raised to 900/2200/4800 and lines paged in this turn are pinned. Hit rate on topic 0/5/21% -> 64/60/75% |
+| 2026-09-15 | Memory: depths of recall | Passed | `node --test studio/tests/recall.test.mjs` - 12/12; five-layer ladder (reflex, status, chip, archive, links) that stops climbing once satisfied |
+| 2026-09-15 | Memory: two bugs caught by tests | Fixed | Standing rules were given triggers from their own text, so they only fired when the question already repeated them; link rarity ceiling scaled with archive size and excluded the cluster terms on a small archive |
+| 2026-09-15 | Full suite | Passed | `node --test studio/tests/*.test.mjs` - 109/109 passed |

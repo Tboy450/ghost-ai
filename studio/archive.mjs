@@ -66,22 +66,132 @@ export const CODECS = {
 // Order matters only for tie-breaking: the cheapest to unpack wins an exact tie.
 const CODEC_ORDER = ['raw', 'gzip', 'brotli'];
 
+// A shared dictionary, the way a MUD client does it.
+//
+// MCCP does not compress each line on its own — it holds one zlib stream open for the
+// whole session, so the dictionary keeps accumulating and a short line late in the
+// session compresses against every line before it. That is why a MUD can push tiny,
+// endlessly repetitive packets and still get large compression ratios.
+//
+// Pockets cannot hold one stream open: each one must be independently openable, in any
+// order, years later, or random access to the archive is lost. So the accumulated
+// dictionary is made explicit instead. A dictionary is trained over the whole corpus,
+// stored once, and handed to zlib when packing and unpacking. A 300-byte pocket can then
+// match phrases that exist only in *other* pockets, which is exactly what per-pocket
+// compression can never do — it is where the flat ~3.5x ratio comes from.
+//
+// The dictionary is versioned and its id is recorded in the pocket's codec name
+// (`zdict:7`). Retraining therefore never invalidates existing pockets: they keep opening
+// with the dictionary they were written against, and a pocket whose dictionary is missing
+// degrades to its digest like any other unreadable codec.
+const DICTIONARY_BYTES = 32768;
+const MIN_PHRASE = 12;
+
+// zlib can only match against the dictionary's *last* 32KB, and matches nearer the end are
+// encoded in fewer bits, so the most valuable material is placed last.
+export function trainDictionary(texts, {max = DICTIONARY_BYTES} = {}) {
+  const counts = new Map();
+  const add = phrase => {
+    const key = phrase.trim();
+    if (key.length < MIN_PHRASE) return;
+    counts.set(key, (counts.get(key) || 0) + 1);
+  };
+  for (const text of texts) {
+    const lines = String(text || '').split('\n');
+    for (const line of lines) {
+      add(line);
+      // Word runs as well as whole lines: conversations repeat phrases inside sentences
+      // far more often than they repeat a sentence exactly.
+      const words = line.split(/\s+/).filter(Boolean);
+      for (let n = 4; n <= 8; n += 2) {
+        for (let i = 0; i + n <= words.length; i++) add(words.slice(i, i + n).join(' '));
+      }
+    }
+  }
+  // Value a phrase by the bytes it can actually save: it has to appear more than once,
+  // and a long repeated phrase is worth more than a short one.
+  const ranked = [...counts.entries()]
+    .filter(([, count]) => count > 1)
+    .map(([phrase, count]) => ({phrase, gain: (count - 1) * phrase.length}))
+    .sort((a, b) => a.gain - b.gain);
+
+  const parts = [];
+  let size = 0;
+  for (const {phrase} of ranked) {
+    const piece = phrase + '\n';
+    if (size + piece.length > max) continue;
+    parts.push(piece);
+    size += piece.length;
+  }
+  return Buffer.from(parts.join(''), 'utf8');
+}
+
+// Packing against a dictionary is only worth it when it actually wins, so it competes with
+// the plain codecs rather than replacing them.
+//
+// Brotli with a custom dictionary is dramatically better than deflate with one (on a
+// repetitive span, 82 bytes plain brotli versus 17 with the dictionary), but custom
+// dictionaries are a newer addition to Node's brotli bindings. Support is therefore probed
+// once at load, and deflate is kept as the fallback so an older runtime still gets most of
+// the benefit. Both record distinct codec names, so an archive written on one runtime
+// stays readable on the other.
+const DICTIONARY_CODECS = {
+  bdict: {
+    pack: (text, dictionary) => zlib.brotliCompressSync(Buffer.from(text, 'utf8'), {dictionary}),
+    unpack: (body, dictionary) => zlib.brotliDecompressSync(Buffer.from(body), {dictionary}).toString('utf8'),
+  },
+  zdict: {
+    pack: (text, dictionary) => zlib.deflateSync(Buffer.from(text, 'utf8'), {dictionary, level: 9}),
+    unpack: (body, dictionary) => zlib.inflateSync(Buffer.from(body), {dictionary}).toString('utf8'),
+  },
+};
+
+// Probed rather than assumed: a runtime that accepts the option but ignores it would
+// silently produce pockets that cannot be reopened, so the round trip is what is tested.
+const PREFERRED_DICT_CODEC = (() => {
+  const probe = 'probe text for dictionary support '.repeat(4);
+  const dictionary = Buffer.from(probe, 'utf8');
+  try {
+    const packed = DICTIONARY_CODECS.bdict.pack(probe, dictionary);
+    if (DICTIONARY_CODECS.bdict.unpack(packed, dictionary) === probe) return 'bdict';
+  } catch { /* fall through to deflate */ }
+  return 'zdict';
+})();
+
+export function parseCodec(codec) {
+  const match = /^(bdict|zdict):(\d+)$/.exec(String(codec || ''));
+  return match ? {name: match[1], dictionary: Number(match[2])} : {name: String(codec || ''), dictionary: null};
+}
+
 // Picks the algorithm that is actually smallest for this span rather than assuming one.
 // Short pockets are common and compression framing can make them larger, so `raw` wins there.
-export function packBody(text) {
+export function packBody(text, dict = null) {
   let best = null;
   for (const name of CODEC_ORDER) {
     let packed;
     try { packed = CODECS[name].pack(text); } catch { continue; }
     if (!best || packed.length < best.body.length) best = {codec: name, body: packed};
   }
+  if (dict?.body?.length) {
+    try {
+      const packed = DICTIONARY_CODECS[PREFERRED_DICT_CODEC].pack(text, dict.body);
+      if (!best || packed.length < best.body.length) best = {codec: `${PREFERRED_DICT_CODEC}:${dict.id}`, body: packed};
+    } catch { /* fall back to whichever plain codec won */ }
+  }
   return best || {codec: 'raw', body: Buffer.from(text, 'utf8')};
 }
 
 // Unpacks using whatever algorithm the pocket recorded. An unknown or damaged pocket
-// returns null so the caller can fall back to its digest.
-export function unpackBody(codec, body) {
-  const algorithm = CODECS[codec];
+// returns null so the caller can fall back to its digest. `getDictionary` is only consulted
+// for dictionary-packed pockets, so plain pockets never touch the database.
+export function unpackBody(codec, body, getDictionary = null) {
+  const {name, dictionary} = parseCodec(codec);
+  if (DICTIONARY_CODECS[name] && dictionary !== null) {
+    const dict = getDictionary?.(dictionary);
+    if (!dict?.length) return null;
+    try { return DICTIONARY_CODECS[name].unpack(body, dict); } catch { return null; }
+  }
+  const algorithm = CODECS[name];
   if (!algorithm) return null;
   try { return algorithm.unpack(body); } catch { return null; }
 }
@@ -103,6 +213,20 @@ CREATE TABLE IF NOT EXISTS pockets (
 );
 CREATE INDEX IF NOT EXISTS pockets_conversation ON pockets(conversation);
 CREATE VIRTUAL TABLE IF NOT EXISTS pockets_fts USING fts5(pocket_id UNINDEXED, body);
+CREATE TABLE IF NOT EXISTS dictionaries (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  created TEXT NOT NULL,
+  body BLOB NOT NULL,
+  samples INTEGER,
+  bytes INTEGER
+);
+CREATE TABLE IF NOT EXISTS pocket_links (
+  a TEXT NOT NULL,
+  b TEXT NOT NULL,
+  weight REAL NOT NULL,
+  PRIMARY KEY (a, b)
+);
+CREATE INDEX IF NOT EXISTS pocket_links_a ON pocket_links(a);
 `;
 
 function sqlite() {
@@ -176,10 +300,11 @@ export function rememberConversation(dirs, conversationId, title, history) {
     const pockets = packPockets(cards);
     const insert = db.prepare('INSERT OR REPLACE INTO pockets (id, conversation, title, seq, time, kind, digest, codec, body, cards, tokens, raw_bytes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
     const index = db.prepare('INSERT INTO pockets_fts (pocket_id, body) VALUES (?, ?)');
+    const dict = latestDictionary(db);
     pockets.forEach((pocket, seq) => {
       const id = `${conversationId}:${seq}`;
       const text = pocket.cards.map(card => card.text).join('\n');
-      const {codec, body} = packBody(text);
+      const {codec, body} = packBody(text, dict);
       const digest = digestOf(pocket.cards);
       const kind = pocket.cards.some(card => card.kind === 'constraint') ? 'constraint'
         : pocket.cards.some(card => card.kind === 'decision') ? 'decision' : 'context';
@@ -202,6 +327,72 @@ function dropConversation(db, conversationId) {
 export function forgetConversation(dirs, conversationId) {
   if (!conversationId) return false;
   return withArchive(dirs, db => { dropConversation(db, conversationId); return true; }, false);
+}
+
+// --- dictionary lifecycle -------------------------------------------------------------
+
+function loadDictionary(db, id) {
+  if (!id) return null;
+  const row = db.prepare('SELECT body FROM dictionaries WHERE id = ?').get(id);
+  return row ? Buffer.from(row.body) : null;
+}
+
+function latestDictionary(db) {
+  const row = db.prepare('SELECT id, body FROM dictionaries ORDER BY id DESC LIMIT 1').get();
+  return row ? {id: row.id, body: Buffer.from(row.body)} : null;
+}
+
+// A dictionary is only useful once there is a corpus to learn from, and it only pays for
+// itself if it is trained on what the archive actually holds. Retraining writes a NEW
+// dictionary rather than replacing the old one, so every pocket already written stays
+// readable; `repackArchive` then moves pockets onto it at leisure.
+export function trainArchiveDictionary(dirs, {minPockets = 8} = {}) {
+  return withArchive(dirs, db => {
+    const rows = db.prepare('SELECT codec, body FROM pockets').all();
+    if (rows.length < minPockets) return null;
+    const texts = [];
+    for (const row of rows) {
+      const text = unpackBody(row.codec, row.body, id => loadDictionary(db, id));
+      if (text) texts.push(text);
+    }
+    if (!texts.length) return null;
+    const body = trainDictionary(texts);
+    if (!body.length) return null;
+    const info = db.prepare('INSERT INTO dictionaries (created, body, samples, bytes) VALUES (?, ?, ?, ?)')
+      .run(new Date().toISOString(), body, texts.length, body.length);
+    return {id: Number(info.lastInsertRowid), bytes: body.length, samples: texts.length};
+  }, null);
+}
+
+// Re-packs pockets against the newest dictionary. Each pocket is opened with its own
+// recorded codec and only rewritten when the new packing is genuinely smaller, so this is
+// always safe to run and can never make the archive larger.
+export function repackArchive(dirs, {limit = 5000} = {}) {
+  return withArchive(dirs, db => {
+    const dict = latestDictionary(db);
+    if (!dict) return {repacked: 0, before: 0, after: 0};
+    const rows = db.prepare('SELECT id, codec, body FROM pockets LIMIT ?').all(limit);
+    const update = db.prepare('UPDATE pockets SET codec = ?, body = ? WHERE id = ?');
+    let repacked = 0, before = 0, after = 0;
+    for (const row of rows) {
+      const current = Buffer.from(row.body);
+      before += current.length;
+      if (parseCodec(row.codec).dictionary === dict.id) { after += current.length; continue; }
+      const text = unpackBody(row.codec, current, id => loadDictionary(db, id));
+      if (text === null) { after += current.length; continue; }
+      const packed = packBody(text, dict);
+      if (packed.body.length < current.length) {
+        update.run(packed.codec, packed.body, row.id);
+        after += packed.body.length;
+        repacked++;
+      } else { after += current.length; }
+    }
+    // Dictionaries no pocket references any more are dead weight in the project folder.
+    db.prepare(`DELETE FROM dictionaries WHERE id != ? AND id NOT IN (
+      SELECT CAST(substr(codec, instr(codec, ':') + 1) AS INTEGER) FROM pockets
+      WHERE codec LIKE 'zdict:%' OR codec LIKE 'bdict:%')`).run(dict.id);
+    return {repacked, before, after, dictionary: dict.id};
+  }, {repacked: 0, before: 0, after: 0});
 }
 
 // FTS5 treats a bare word list as a phrase and chokes on its own operators, so the query is
@@ -243,6 +434,108 @@ export function recall(dirs, query, {limit = 6, excludeConversation = null} = {}
   }, []);
 }
 
+// ---------------------------------------------------------------------------------------
+// The associative index — the "mapper" layer.
+//
+// Keyword search answers "which pocket contains these words". It cannot answer "what else
+// turned out to matter whenever this came up", and that second question is the one that
+// carries a conversation which has moved onto new ground. A MUD client has the same split:
+// the scrollback is searchable text, but the mapper is a *derived* graph built from the
+// stream, and you navigate it rather than grep it.
+//
+// Two pockets are linked when they share terms that are rare across the archive. Rarity is
+// what makes the link mean something: every pocket shares "the" and "file", so matching on
+// those links everything to everything and the graph carries no information at all.
+const LINK_RARITY = 0.18;   // a term in more than this share of pockets is too common to link on
+const LINK_CEILING_MIN = 4; // ...but never so strict that a small archive can link nothing
+const LINKS_PER_POCKET = 6; // keeping only the strongest few stops the graph becoming dense
+
+export function buildLinks(dirs, {minShared = 2} = {}) {
+  return withArchive(dirs, db => {
+    const rows = db.prepare('SELECT id, digest, title, kind FROM pockets').all();
+    if (rows.length < 2) return {pockets: rows.length, links: 0};
+
+    // One inverted index, built once. Comparing every pocket against every other would be
+    // quadratic; walking each term's posting list only compares pockets that can possibly
+    // be linked, and the rarity cap keeps those lists short by construction.
+    const postings = new Map();
+    for (const row of rows) {
+      for (const term of new Set(terms(`${row.title || ''} ${row.digest}`))) {
+        if (!postings.has(term)) postings.set(term, []);
+        postings.get(term).push(row.id);
+      }
+    }
+
+    // The rarity ceiling is a share of the archive, but a share of a *small* archive is
+    // smaller than a cluster: with a dozen pockets, `n * 0.18` is two, so the terms that
+    // actually define a topic get excluded for appearing in three of its pockets and the
+    // graph comes out empty. The floor keeps a young archive navigable; the fraction takes
+    // over once there is enough material for it to mean something.
+    const ceiling = Math.max(LINK_CEILING_MIN, Math.floor(rows.length * LINK_RARITY));
+    const pairs = new Map();
+    for (const [, ids] of postings) {
+      if (ids.length < 2 || ids.length > ceiling) continue;
+      // Rarer terms say more, so a term shared by two pockets counts for more than one
+      // shared by twenty.
+      const value = 1 / Math.log2(1 + ids.length);
+      for (let i = 0; i < ids.length; i++) {
+        for (let j = i + 1; j < ids.length; j++) {
+          const key = ids[i] < ids[j] ? `${ids[i]}\u0000${ids[j]}` : `${ids[j]}\u0000${ids[i]}`;
+          const seen = pairs.get(key) || {weight: 0, shared: 0};
+          seen.weight += value;
+          seen.shared++;
+          pairs.set(key, seen);
+        }
+      }
+    }
+
+    // Keep only each pocket's strongest neighbours. A pocket linked to two hundred others
+    // is linked to nothing useful, and traversing it would flood the budget.
+    const best = new Map();
+    for (const [key, {weight, shared}] of pairs) {
+      if (shared < minShared) continue;
+      const [a, b] = key.split('\u0000');
+      for (const [from, to] of [[a, b], [b, a]]) {
+        if (!best.has(from)) best.set(from, []);
+        best.get(from).push({to, weight});
+      }
+    }
+
+    db.exec('DELETE FROM pocket_links');
+    const insert = db.prepare('INSERT OR REPLACE INTO pocket_links (a, b, weight) VALUES (?, ?, ?)');
+    let written = 0;
+    for (const [from, edges] of best) {
+      edges.sort((x, y) => y.weight - x.weight);
+      for (const edge of edges.slice(0, LINKS_PER_POCKET)) { insert.run(from, edge.to, edge.weight); written++; }
+    }
+    return {pockets: rows.length, links: written};
+  }, {pockets: 0, links: 0});
+}
+
+// Walks outward from pockets already in hand. `seeds` are usually whatever the chip is
+// holding, so this asks "given where we already are, what neighbours on the map?" — which
+// is exactly the question a fresh topic cannot ask of a keyword index.
+export function linkedPockets(dirs, seeds, {limit = 4} = {}) {
+  const ids = [...new Set((seeds || []).filter(Boolean))];
+  if (!ids.length) return [];
+  return withArchive(dirs, db => {
+    const holes = ids.map(() => '?').join(',');
+    const rows = db.prepare(`
+      SELECT p.id, p.conversation, p.title, p.seq, p.time, p.kind, p.digest, p.codec, p.cards, p.tokens,
+             SUM(l.weight) AS weight
+      FROM pocket_links l JOIN pockets p ON p.id = l.b
+      WHERE l.a IN (${holes}) AND l.b NOT IN (${holes})
+      GROUP BY l.b ORDER BY weight DESC LIMIT ?
+    `).all(...ids, ...ids, limit);
+    return rows.map(row => ({
+      ...row,
+      expanded: false,
+      via: 'links',
+      score: row.weight + (row.kind === 'constraint' ? 1.5 : row.kind === 'decision' ? 0.75 : 0),
+    }));
+  }, []);
+}
+
 // Unpacks one pocket with the algorithm it recorded. This is the only path that pays the
 // full cost of a span, and the only path that decompresses anything.
 export function expandPocket(dirs, pocketId) {
@@ -250,7 +543,7 @@ export function expandPocket(dirs, pocketId) {
   return withArchive(dirs, db => {
     const row = db.prepare('SELECT id, conversation, title, time, kind, digest, codec, body FROM pockets WHERE id = ?').get(pocketId);
     if (!row) return null;
-    const text = unpackBody(row.codec, row.body);
+    const text = unpackBody(row.codec, row.body, id => loadDictionary(db, id));
     if (text === null) return null;
     return {id: row.id, conversation: row.conversation, title: row.title, time: row.time, kind: row.kind, digest: row.digest, codec: row.codec, expanded: true, text};
   });
