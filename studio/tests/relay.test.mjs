@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { splitIntoSegments, extractSegment, planSegments, scopeFiles, startRelay, submitGuidance, implementSegments, assembleFiles, applyRelay, relayState, clearRelay, readRelay, renderBriefPrompt, BROWSER_CHATS } from '../relay.mjs';
+import { splitIntoSegments, extractSegment, checkSyntax, planSegments, scopeFiles, startRelay, submitGuidance, implementSegments, assembleFiles, applyRelay, relayState, clearRelay, readRelay, renderBriefPrompt, BROWSER_CHATS } from '../relay.mjs';
 
 function tempProject() {
   const root = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'ghost-relay-test-'));
@@ -105,8 +105,54 @@ test('an empty reply and an empty code block are both rejected', () => {
   assert.equal(extractSegment('```\n\n```', 'const a = 1;').ok, false);
 });
 
-test('KEEP and an unchanged rewrite both mean no change', () => {
-  assert.deepEqual(extractSegment('KEEP', 'const a = 1;'), {ok: true, keep: true});
+// Taken from a real qwen3:4b-instruct reply. The fence was written as "``` " with a
+// trailing space, the old pattern demanded a bare newline after the backticks, and a
+// perfectly good rewrite was discarded as "no code block in the reply".
+test('a fence with a trailing space, a language tag, or a carriage return is still read', () => {
+  const original = 'const a = 1;\nconst b = 2;';
+  const rewritten = 'const a = 10;\nconst b = 2;';
+  for (const opening of ['``` ', '```js', '```javascript ', '```\t']) {
+    const result = extractSegment(`${opening}\n${rewritten}\n\`\`\``, original);
+    assert.equal(result.ok, true, `${JSON.stringify(opening)} should be read as a code block`);
+    assert.equal(result.content, rewritten);
+  }
+  const crlf = extractSegment('``` \r\n' + rewritten + '\n```', original);
+  assert.equal(crlf.ok, true, 'a carriage return after the fence should be tolerated');
+});
+
+// Both lines below are verbatim from a real relay run against studio/projects.mjs.
+// Neither is caught by the length guards: the file is the right size and reads like
+// code. One imports from 'node制约', the other calls loadRegistry(registry_ path).
+test('a rewrite that slips characters from another alphabet into the code is rejected', () => {
+  const original = "import path from 'node:path';\nconst root = path.resolve('.');";
+  const corrupted = "import path from 'node\u5236\u7ea6';\nconst root = path.resolve('.');";
+  const result = extractSegment('```js\n' + corrupted + '\n```', original);
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /another alphabet/);
+});
+
+test('a rewrite is allowed to keep characters the original already had', () => {
+  const original = "const label = '\u65e5\u672c\u8a9e';\nconst n = 1;";
+  const rewritten = "const label = '\u65e5\u672c\u8a9e';\nconst n = 2;";
+  assert.equal(extractSegment('```\n' + rewritten + '\n```', original).ok, true);
+});
+
+test('a file that no longer parses is named and never applied', () => {
+  const broken = checkSyntax([{path: 'studio/projects.mjs', content: 'export function a(){ return loadRegistry(registry_ path); }'}]);
+  assert.equal(broken.length, 1);
+  assert.match(broken[0], /studio\/projects\.mjs/);
+  assert.match(broken[0], /SyntaxError/);
+});
+
+test('valid code and non-JavaScript files pass the syntax check', () => {
+  const clean = checkSyntax([
+    {path: 'studio/projects.mjs', content: 'export const a = 1;\nexport function b(){ return a; }'},
+    {path: 'docs/notes.md', content: 'this is ## not javascript ((('},
+  ]);
+  assert.deepEqual(clean, []);
+});
+
+test('KEEP and an unchanged rewrite both mean no change', () => {  assert.deepEqual(extractSegment('KEEP', 'const a = 1;'), {ok: true, keep: true});
   assert.deepEqual(extractSegment('```\nconst a = 1;\n```', 'const a = 1;'), {ok: true, keep: true});
 });
 

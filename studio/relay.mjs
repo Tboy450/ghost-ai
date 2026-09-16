@@ -31,6 +31,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { randomUUID } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
 import { addWorktree, removeWorktree, stageIntentToAdd, commit, push, diff } from './git.mjs';
 import { gatherContext, applyProposal, isProtectedPath, runTests, getFocus, advanceFocus, buildRepoSummary } from './selfimprove.mjs';
 import { modelComplete } from './core.mjs';
@@ -52,9 +53,11 @@ export const BROWSER_CHATS = [
 ];
 const CHAT_IDS = new Set(BROWSER_CHATS.map(c => c.id));
 
-// One segment of one file. Small enough that a local 4B model can hold all of it,
-// the plan, and its own answer in context at once without truncating.
-export const SEGMENT_BUDGET = 2400;
+// One segment of one file. Measured, not guessed: at 2400 a 4B model summarised a
+// 2342-character piece down to 419 characters — it read the whole span but rewrote
+// only the part it judged interesting. A piece has to be small enough that reproducing
+// it verbatim is easier than summarising it, and 900 is where that holds in practice.
+export const SEGMENT_BUDGET = 900;
 export const SEGMENT_TIMEOUT_MS = 120000;
 export const MAX_SEGMENTS = 40;
 
@@ -194,7 +197,10 @@ export function extractSegment(reply, original) {
   const text = String(reply || '').trim();
   if (!text) return {ok: false, reason: 'empty reply'};
   if (/^keep\b/i.test(text)) return {ok: true, keep: true};
-  const fence = /```[a-z]*\n([\s\S]*?)```/.exec(text);
+  // The opening fence is matched loosely on purpose. Models routinely put a language
+  // tag, a trailing space, or a carriage return after the backticks, and a real reply
+  // was thrown away as "no code block" because the pattern demanded a bare newline.
+  const fence = /```[^\n]*\r?\n([\s\S]*?)```/.exec(text);
   if (!fence) return {ok: false, reason: 'no code block in the reply'};
   const body = fence[1].replace(/\s+$/, '');
   if (!body.trim()) return {ok: false, reason: 'empty code block'};
@@ -202,6 +208,13 @@ export function extractSegment(reply, original) {
   // rewritten — the classic small-model failure on a long span.
   if (body.length < original.length * 0.4 && original.length > 200) return {ok: false, reason: 'the reply dropped most of the code'};
   if (body.length > original.length * 3 + 500) return {ok: false, reason: 'the reply ballooned well past the original'};
+  // Script drift. A small model under pressure will emit a token from another writing
+  // system in the middle of otherwise fine code — a real run turned `'node:path'` into
+  // `'node制约'`, in a line the plan never mentioned. Length guards cannot see this and
+  // the result is a file that looks plausible and does not run. If the original had no
+  // such characters, the rewrite may not introduce them.
+  const foreign = /[\u3000-\u9fff\uac00-\ud7af\u0400-\u04ff\u0590-\u06ff]/;
+  if (foreign.test(body) && !foreign.test(original)) return {ok: false, reason: 'the reply inserted characters from another alphabet into the code'};
   // Looping on one line is the other classic: the model repeats itself until the
   // output limit rather than finishing.
   const lines = body.split('\n').map(l => l.trim()).filter(Boolean);
@@ -287,6 +300,30 @@ export function relayState(dirs, loaded) {
   };
 }
 
+// Refuses a file that no longer parses. The test suite would eventually catch this,
+// but only for files a test actually imports, and only after a worktree and a full
+// run. A real relay produced `loadRegistry(registry_ path)` — one stray space, a file
+// that cannot load. Checking here means the answer is immediate and names the line.
+export function checkSyntax(files) {
+  const problems = [];
+  const dir = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'ghost-syntax-'));
+  try {
+    for (const file of files) {
+      if (!/\.(mjs|cjs|js)$/.test(file.path)) continue;
+      const probe = path.join(dir, `probe-${problems.length}-${path.basename(file.path)}`);
+      fs.writeFileSync(probe, file.content);
+      const run = spawnSync(process.execPath, ['--check', probe], {encoding: 'utf8'});
+      if (run.status !== 0) {
+        const detail = String(run.stderr || '').split('\n').find(l => /SyntaxError/.test(l)) || 'it could not be parsed';
+        problems.push(`${file.path}: ${detail.trim()}`);
+      }
+    }
+  } finally {
+    fs.rmSync(dir, {recursive: true, force: true});
+  }
+  return problems;
+}
+
 // Applies the assembled files the same way an API cycle does: in a disposable
 // worktree, tests first, committed only on green. Nothing that came out of a browser
 // or a small local model is trusted enough to touch the real checkout untested.
@@ -297,6 +334,11 @@ export function applyRelay(dirs, {codeRoot, testGlob = 'studio/tests/*.test.mjs'
   if (!files.length) throw fail('Nothing has been rewritten yet, so there is nothing to apply.', 409);
   const root = codeRoot || run.codeRoot;
   const result = {time: new Date().toISOString(), source: 'browser-relay', chat: run.chat, focus: run.focus, summary: run.guidance.split('\n')[0].slice(0, 200), applied: files.map(f => f.path), skipped: run.segments.filter(s => s.state === 'skipped').length, testResult: null, diff: null, committed: false, pushed: false, commitHash: null, branch, error: null};
+  const broken = checkSyntax(files);
+  if (broken.length) {
+    result.error = `The rewritten code does not parse, so nothing was applied and nothing in your project changed:\n${broken.join('\n')}`;
+    return finish(dirs, run, result);
+  }
   const tmpDir = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'ghost-relay-'));
   try {
     addWorktree(root, tmpDir, branch);

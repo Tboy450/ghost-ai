@@ -281,7 +281,10 @@ const server=http.createServer(async(req,res)=>{
       relayBusy=true;
       res.writeHead(200,{'Content-Type':'application/x-ndjson; charset=utf-8','Cache-Control':'no-store'});
       try {
-        const state=await implementSegments(dirs,{endpoint:OLLAMA,model:input.model,onProgress:s=>res.write(JSON.stringify({type:'progress',state})+'\n')});
+        // The progress callback must report the snapshot it is handed. Referring to the
+        // `state` being awaited below is a dead-zone error that fires on the first tick
+        // and takes the whole run down with it.
+        const state=await implementSegments(dirs,{endpoint:OLLAMA,model:input.model,onProgress:s=>res.write(JSON.stringify({type:'progress',state:s})+'\n')});
         res.write(JSON.stringify({type:'done',state})+'\n');
       } catch(error) { res.write(JSON.stringify({type:'error',message:error.message})+'\n'); }
       finally { relayBusy=false; res.end(); }

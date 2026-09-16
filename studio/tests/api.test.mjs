@@ -138,3 +138,45 @@ test('the studio recalls a decision made in an earlier conversation', {timeout:3
     fs.rmSync(fs.realpathSync(dir),{recursive:true,force:true});
   }
 });
+
+// The relay's implement step streams progress over NDJSON from the server handler, so a
+// mistake in that handler cannot be caught by a unit test of implementSegments. A first
+// version referred to the `state` it was still awaiting, which threw on the first tick and
+// killed the whole run; this drives the real endpoint and insists progress actually flows.
+test('relay implement streams progress and finishes without an error line', {timeout:60000}, async()=>{
+  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'ghost-relay-api-'));
+  const fake=http.createServer(async(req,res)=>{
+    if(req.url==='/api/tags'){res.setHeader('Content-Type','application/json');return res.end(JSON.stringify({models:[{name:'test-local',digest:'fixture-only',size:1}]}));}
+    for await(const chunk of req){void chunk;}
+    res.setHeader('Content-Type','application/x-ndjson');
+    res.end(JSON.stringify({message:{content:'```js\nconst unusable = true;\n```'},done:true})+'\n');
+  });
+  await new Promise(resolve=>fake.listen(0,'127.0.0.1',resolve));
+  const probe=http.createServer();await new Promise(resolve=>probe.listen(0,'127.0.0.1',resolve));const port=probe.address().port;await new Promise(resolve=>probe.close(resolve));
+  const appPath=fileURLToPath(new URL('../server.mjs',import.meta.url));
+  const child=spawn(process.execPath,[appPath],{env:{...process.env,STUDIO_PORT:String(port),STUDIO_DATA_DIR:dir,STUDIO_OLLAMA_URL:`http://127.0.0.1:${fake.address().port}`},stdio:['ignore','pipe','pipe']});
+  const origin=`http://127.0.0.1:${port}`;
+  try{
+    await Promise.race([once(child.stdout,'data'),new Promise((_,reject)=>child.once('exit',code=>reject(new Error(`Server exited ${code}`))))]);
+    const boot=await fetch(origin+'/api/bootstrap').then(r=>r.json());
+    const headers={'Content-Type':'application/json','X-Studio-Token':boot.token,Origin:origin};
+    const request=(url,body,method='POST')=>fetch(origin+url,{method,headers,body:JSON.stringify(body)});
+    await request('/api/relay',{chat:'chatgpt',focus:'Tidy the project helpers.'});
+    const guided=await request('/api/relay/guidance',{guidance:'FILES: studio/projects.mjs\nPLAN:\n- In studio/projects.mjs, keep every exported name exactly as it is.'},'PUT').then(r=>r.json());
+    assert.ok(guided.total>0,'the plan should queue at least one segment');
+    const stream=await request('/api/relay/implement',{model:'test-local'});
+    assert.equal(stream.status,200);
+    const lines=(await stream.text()).trim().split('\n').filter(Boolean).map(JSON.parse);
+    assert.ok(!lines.some(l=>l.type==='error'),`the run reported an error: ${lines.find(l=>l.type==='error')?.message}`);
+    assert.ok(lines.some(l=>l.type==='progress'),'progress should stream while the model works');
+    // Every progress line must carry a usable snapshot, which is exactly what the
+    // dead-zone bug destroyed.
+    for(const line of lines.filter(l=>l.type==='progress')) assert.ok(Array.isArray(line.state?.segments),'each progress line carries the current segments');
+    assert.equal(lines.at(-1).type,'done');
+    assert.equal(lines.at(-1).state.counts.pending,0,'no segment is left waiting once the run ends');
+  }finally{
+    child.kill();await once(child,'exit').catch(()=>{});
+    await new Promise(resolve=>fake.close(resolve));
+    fs.rmSync(fs.realpathSync(dir),{recursive:true,force:true});
+  }
+});
