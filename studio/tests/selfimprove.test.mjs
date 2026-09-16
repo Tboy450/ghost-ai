@@ -8,6 +8,7 @@ import { spawnSync } from 'node:child_process';
 import {
   PROVIDERS, listProviders, getFocus, setFocus, advanceFocus,
   callProvider, parseProposal, applyProposal, runCycle, listHistory,
+  setProviderKey, clearProviderKey, resolveKey, testProvider,
 } from '../selfimprove.mjs';
 
 function run(dir, args) { return spawnSync('git', args, {cwd: dir, encoding: 'utf8'}); }
@@ -59,6 +60,70 @@ test('listProviders reports configured state from env vars without leaking keys'
   } finally {
     if (before === undefined) delete process.env.GHOST_OPENAI_API_KEY; else process.env.GHOST_OPENAI_API_KEY = before;
   }
+});
+
+test('a saved key configures a provider, is preferred over nothing, and can be removed', () => {
+  const ghost = fs.mkdtempSync(path.join(os.tmpdir(), 'ghost-keys-'));
+  const before = process.env.GHOST_DEEPSEEK_API_KEY;
+  try {
+    delete process.env.GHOST_DEEPSEEK_API_KEY;
+    const dirs = dirsFor(ghost);
+    assert.equal(listProviders(dirs).find(p => p.id === 'deepseek').configured, false);
+    setProviderKey(dirs, 'deepseek', 'sk-saved');
+    const saved = listProviders(dirs).find(p => p.id === 'deepseek');
+    assert.equal(saved.configured, true);
+    assert.equal(saved.source, 'saved in this project');
+    assert.equal(resolveKey(dirs, 'deepseek'), 'sk-saved');
+    // The stored key must never be returned to the browser.
+    assert.ok(!JSON.stringify(listProviders(dirs)).includes('sk-saved'));
+    // An environment variable outranks the stored key.
+    process.env.GHOST_DEEPSEEK_API_KEY = 'sk-env';
+    assert.equal(resolveKey(dirs, 'deepseek'), 'sk-env');
+    assert.equal(listProviders(dirs).find(p => p.id === 'deepseek').source, 'environment');
+    delete process.env.GHOST_DEEPSEEK_API_KEY;
+    clearProviderKey(dirs, 'deepseek');
+    assert.equal(listProviders(dirs).find(p => p.id === 'deepseek').configured, false);
+    assert.throws(() => setProviderKey(dirs, 'nope', 'k'), /Unknown AI provider/);
+    assert.throws(() => setProviderKey(dirs, 'deepseek', '  '), /Provide an API key/);
+  } finally {
+    if (before === undefined) delete process.env.GHOST_DEEPSEEK_API_KEY; else process.env.GHOST_DEEPSEEK_API_KEY = before;
+    fs.rmSync(ghost, {recursive: true, force: true});
+  }
+});
+
+test('testProvider verifies a saved key against the real endpoint shape', async (t) => {
+  const ghost = fs.mkdtempSync(path.join(os.tmpdir(), 'ghost-test-provider-'));
+  const seen = [];
+  const server = await startFakeProvider((req, res, body) => {
+    seen.push({auth: req.headers.authorization, body: JSON.parse(body)});
+    res.writeHead(200, {'Content-Type': 'application/json'});
+    res.end(JSON.stringify({choices: [{message: {content: 'OK'}}]}));
+  });
+  const baseUrl = `http://127.0.0.1:${server.address().port}/v1`;
+  t.after(() => { server.close(); fs.rmSync(ghost, {recursive: true, force: true}); });
+  const dirs = dirsFor(ghost);
+  await assert.rejects(testProvider('openrouter', {dirs, baseUrl}), /not configured/);
+  setProviderKey(dirs, 'openrouter', 'sk-or-test');
+  const result = await testProvider('openrouter', {dirs, baseUrl});
+  assert.equal(result.ok, true);
+  assert.equal(result.reply, 'OK');
+  assert.equal(result.model, PROVIDERS.openrouter.defaultModel);
+  assert.ok(result.latencyMs >= 0);
+  assert.equal(seen[0].auth, 'Bearer sk-or-test');
+  assert.equal(seen[0].body.model, PROVIDERS.openrouter.defaultModel);
+});
+
+test('testProvider surfaces a provider rejection instead of reporting success', async (t) => {
+  const ghost = fs.mkdtempSync(path.join(os.tmpdir(), 'ghost-test-provider-bad-'));
+  const server = await startFakeProvider((req, res) => {
+    res.writeHead(401, {'Content-Type': 'application/json'});
+    res.end(JSON.stringify({error: {message: 'Invalid API key'}}));
+  });
+  const baseUrl = `http://127.0.0.1:${server.address().port}/v1`;
+  t.after(() => { server.close(); fs.rmSync(ghost, {recursive: true, force: true}); });
+  const dirs = dirsFor(ghost);
+  setProviderKey(dirs, 'grok', 'sk-wrong');
+  await assert.rejects(testProvider('grok', {dirs, baseUrl}), /returned 401/);
 });
 
 test('focus persists, updates, and advances through the queue', () => {

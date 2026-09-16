@@ -7,7 +7,7 @@ import { listFiles, readFile, saveFile, searchProject, modelStream, BASE_PROMPT 
 import { packContext, packAdaptive, PROFILES } from './memory.mjs';
 import { openProject, listProjects, activeProject, switchProject, closeProject, ensureProjectDirs } from './projects.mjs';
 import * as git from './git.mjs';
-import { listProviders, getFocus, setFocus, runCycle, listHistory, PROVIDERS } from './selfimprove.mjs';
+import { listProviders, getFocus, setFocus, runCycle, listHistory, setProviderKey, clearProviderKey, testProvider, PROVIDERS } from './selfimprove.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.dirname(HERE);
@@ -167,7 +167,10 @@ const server=http.createServer(async(req,res)=>{
     if (req.method==='POST' && url.pathname==='/api/git/commit') { const input=await body(req); const result=git.commit(rootFor(input.root||'workspace'),input.message); eventLog('git_commit',`${input.root||'workspace'} · ${result.hash.slice(0,7)}`); return json(res,201,result); }
     if (req.method==='POST' && url.pathname==='/api/git/push') { const input=await body(req); const result=git.push(rootFor(input.root||'workspace'),{remote:input.remote,branch:input.branch}); eventLog('git_push',`${input.root||'workspace'} · ${result.branch}`); return json(res,200,result); }
     if (req.method==='POST' && url.pathname==='/api/git/restore') { const input=await body(req); const content=git.fileAt(rootFor(input.root||'workspace'),input.hash,input.path); return json(res,200,{path:input.path,content}); }
-    if (req.method==='GET' && url.pathname==='/api/self-improve/providers') return json(res,200,{providers:listProviders()});
+    if (req.method==='GET' && url.pathname==='/api/self-improve/providers') return json(res,200,{providers:listProviders(dirs)});
+    if (req.method==='PUT' && url.pathname==='/api/self-improve/key') { const input=await body(req); if(!PROVIDERS_SET.has(input.provider)) throw fail('Choose a supported AI provider.'); return json(res,200,setProviderKey(dirs,input.provider,input.apiKey)); }
+    if (req.method==='DELETE' && url.pathname==='/api/self-improve/key') { const input=await body(req); if(!PROVIDERS_SET.has(input.provider)) throw fail('Choose a supported AI provider.'); return json(res,200,clearProviderKey(dirs,input.provider)); }
+    if (req.method==='POST' && url.pathname==='/api/self-improve/test') { const input=await body(req); if(!PROVIDERS_SET.has(input.provider)) throw fail('Choose a supported AI provider.'); return json(res,200,await testProvider(input.provider,{dirs,model:input.model})); }
     if (req.method==='GET' && url.pathname==='/api/self-improve/focus') return json(res,200,getFocus(dirs));
     if (req.method==='PUT' && url.pathname==='/api/self-improve/focus') { const input=await body(req); return json(res,200,setFocus(dirs,input.focus,input.queue)); }
     if (req.method==='GET' && url.pathname==='/api/self-improve/history') return json(res,200,{cycles:listHistory(dirs)});

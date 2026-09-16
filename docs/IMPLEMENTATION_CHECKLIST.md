@@ -72,6 +72,22 @@ the remote commit is verified.
   - [x] Fixed a Node test-runner quirk: `runTests()` now strips `NODE_TEST*` env vars before spawning the nested `node --test` run, so a cycle's test run isn't silently skipped as a "recursive" test-runner invocation when Ghost's own tests (or Ghost itself) are already running under `node --test`.
   - [x] Manual smoke test: started the real server against a temp git-initialized project, verified `GET /api/git/status|log|diff`, `POST /api/git/commit` (confirmed `.gitignore` auto-added and `.ghost/` correctly excluded from status), and `POST /api/self-improve/run` end-to-end validation paths (unsupported provider → 400, unconfigured provider → clear error recorded in the report and in `/api/self-improve/history`).
   - **Result:** Full suite `node --test studio/tests/*.test.mjs` — 39/39 passed, no regressions.
+- [x] **7a. Remove the comparison testing surface from the studio** *(user correction)*
+  - [x] The Compare tab was a framework-*testing* harness, not a studio feature. Removed the nav item and view from `index.html`, all compare state/functions/listeners from `app.js`, and `comparisonCases()`/`compare()` plus the `/api/cases` and `/api/compare` routes from `server.mjs`. Kept `/api/runs` so previously recorded results stay readable.
+  - [x] Removed the politically charged bias-test content (firearms, abortion, and economic/political argument prompts) that came with that harness: dropped cases `drift_010`, `subject_anti_gun_001`, `subject_abortion_001` from four JSONL datasets, corrected the expected-subjects set in `validate_pack.py`, stripped and renumbered the matching sections/rows in the three test logs, and fixed every count reference in the surrounding docs. A repo-wide re-grep returns zero matches.
+  - [x] Testing lives in its own project from now on, as the user asked — not as a built-in studio tab.
+- [x] **7b. Make the public AI providers actually connectable** *(user's stated top priority)*
+  - [x] **Root cause of "none are functional":** a key could only come from an environment variable, and there was no way to check a key short of running a whole improvement cycle. So every provider showed up in the UI but nothing could reach one.
+  - [x] Added a per-project key store in `selfimprove.mjs`: `setProviderKey`/`clearProviderKey`/`resolveKey`, writing `<project>/.ghost/providers.json` with owner-only permissions. `.ghost/` is already gitignored, so keys can never be committed, and the server never sends a stored key back to the browser — only `configured` and a human-readable `source`.
+  - [x] Precedence is explicit argument → environment variable → saved key, so an existing env-var setup keeps working unchanged.
+  - [x] Added `testProvider()`: a minimal "reply with exactly OK" round-trip that verifies a key in about a second, and surfaces the provider's own rejection instead of silently reporting success.
+  - [x] Added **OpenRouter** as a sixth provider. It is the fastest route to "as many AI working as possible" — a single key reaches GPT, Grok, DeepSeek and Llama, because every provider is driven through the same OpenAI-compatible `/chat/completions` shape.
+  - [x] New API routes: `PUT`/`DELETE /api/self-improve/key` and `POST /api/self-improve/test`.
+  - [x] New "Connect a public AI" panel in the Self-improve view: a key field with Save key / Test connection / Remove key, plus a per-provider status list with connection dots and a "Get a key ↗" link to each provider's key page.
+  - [x] Tests added (42/42 total): saved keys configure a provider, environment variables outrank saved keys, stored keys never appear in the provider listing, a successful connection test, and a rejected key surfacing the provider's error.
+  - [x] Live smoke test on a running server: provider listing, 409 with an actionable message for an unconfigured provider, key save/remove round-trip, no key leakage to the client, and `git check-ignore` confirming `.ghost/providers.json` is ignored.
+  - [x] Connection status is tracked in `docs/AI_PROVIDERS.md` — update it as each provider is verified with a real key.
+  - **Remaining:** no provider has been exercised against a real endpoint yet; that needs one real API key. Combining several providers' context into one cycle, and Janitor AI, are still to come.
 - [ ] **8. Add assisted coding and testing**
 - [ ] **9. Strengthen framework comparisons**
 - [ ] **10. Package Ghost as a desktop application**
@@ -97,5 +113,8 @@ the remote commit is verified.
 | 2026-09-15 | Step 7 selfimprove.mjs tests | Passed | `node --test studio/tests/selfimprove.test.mjs` — 7/7 passed (fake-provider fixture + temp git repo/remote) |
 | 2026-09-15 | Step 7 full suite | Passed | `node --test studio/tests/*.test.mjs` — 39/39 passed (no regressions) |
 | 2026-09-15 | Step 7 manual verification | Complete | Live server against a temp git project: git status/diff/log/commit/push routes verified; `.gitignore` auto-added for `.ghost/`; self-improve run validation (bad provider → 400, unconfigured provider → recorded error) and history persistence verified |
+| 2026-09-15 | Step 7a compare removal | Complete | Compare tab/routes removed; bias-test content purged (repo-wide re-grep returns zero matches); `node --test studio/tests/*.test.mjs` — 39/39 passed |
+| 2026-09-15 | Step 7b provider key store tests | Passed | `node --test studio/tests/*.test.mjs` — 42/42 passed (key round-trip, env-var precedence, no key leakage, connection test success and rejection) |
+| 2026-09-15 | Step 7b provider live smoke test | Complete | Live server on port 4519: provider listing, 409 with actionable message when unconfigured, key save/remove round-trip, no key leaked to client, `git check-ignore` confirms `.ghost/providers.json` ignored |
 
 Update this file whenever a roadmap item is attempted, completed, or blocked.

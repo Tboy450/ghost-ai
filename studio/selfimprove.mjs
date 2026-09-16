@@ -15,17 +15,76 @@ function fail(message, status = 400) { return Object.assign(new Error(message), 
 // client covers all of them. Each is only "configured" once its API key env var is set;
 // Ghost never invents or stores these keys itself.
 export const PROVIDERS = {
-  openai: {label: 'OpenAI (GPT)', baseUrl: 'https://api.openai.com/v1', envKey: 'GHOST_OPENAI_API_KEY', defaultModel: 'gpt-4o-mini'},
-  grok: {label: 'xAI (Grok)', baseUrl: 'https://api.x.ai/v1', envKey: 'GHOST_XAI_API_KEY', defaultModel: 'grok-2-latest'},
-  deepseek: {label: 'DeepSeek', baseUrl: 'https://api.deepseek.com', envKey: 'GHOST_DEEPSEEK_API_KEY', defaultModel: 'deepseek-chat'},
-  meta: {label: 'Meta (Llama, via Together)', baseUrl: 'https://api.together.xyz/v1', envKey: 'GHOST_TOGETHER_API_KEY', defaultModel: 'meta-llama/Llama-3.3-70B-Instruct-Turbo'},
-  copilot: {label: 'GitHub Models (Copilot)', baseUrl: 'https://models.github.ai/inference', envKey: 'GHOST_GITHUB_TOKEN', defaultModel: 'openai/gpt-4o-mini'},
+  openai: {label: 'OpenAI (GPT)', baseUrl: 'https://api.openai.com/v1', envKey: 'GHOST_OPENAI_API_KEY', defaultModel: 'gpt-4o-mini', keysUrl: 'https://platform.openai.com/api-keys'},
+  grok: {label: 'xAI (Grok)', baseUrl: 'https://api.x.ai/v1', envKey: 'GHOST_XAI_API_KEY', defaultModel: 'grok-2-latest', keysUrl: 'https://console.x.ai'},
+  deepseek: {label: 'DeepSeek', baseUrl: 'https://api.deepseek.com', envKey: 'GHOST_DEEPSEEK_API_KEY', defaultModel: 'deepseek-chat', keysUrl: 'https://platform.deepseek.com/api_keys'},
+  meta: {label: 'Meta (Llama, via Together)', baseUrl: 'https://api.together.xyz/v1', envKey: 'GHOST_TOGETHER_API_KEY', defaultModel: 'meta-llama/Llama-3.3-70B-Instruct-Turbo', keysUrl: 'https://api.together.xyz/settings/api-keys'},
+  copilot: {label: 'GitHub Models (Copilot)', baseUrl: 'https://models.github.ai/inference', envKey: 'GHOST_GITHUB_TOKEN', defaultModel: 'openai/gpt-4o-mini', keysUrl: 'https://github.com/settings/tokens'},
+  // One OpenRouter key reaches GPT, Grok, DeepSeek, Llama and more through a single
+  // endpoint, so it is the quickest way to get several public models working at once.
+  openrouter: {label: 'OpenRouter (many models, one key)', baseUrl: 'https://openrouter.ai/api/v1', envKey: 'GHOST_OPENROUTER_API_KEY', defaultModel: 'deepseek/deepseek-chat', keysUrl: 'https://openrouter.ai/keys'},
 };
 
-export function listProviders() {
-  return Object.entries(PROVIDERS).map(([id, info]) => ({
-    id, label: info.label, model: info.defaultModel, configured: Boolean(process.env[info.envKey]),
-  }));
+// Keys live in the project's gitignored .ghost/ folder so they are never committed.
+// An environment variable, when present, always wins over the stored key.
+function keyStorePath(dirs) { return path.join(dirs.ghost, 'providers.json'); }
+
+function readKeyStore(dirs) {
+  try { return JSON.parse(fs.readFileSync(keyStorePath(dirs), 'utf8')); } catch { return {}; }
+}
+
+export function setProviderKey(dirs, providerId, apiKey) {
+  if (!PROVIDERS[providerId]) throw fail(`Unknown AI provider "${providerId}".`);
+  if (typeof apiKey !== 'string' || !apiKey.trim()) throw fail('Provide an API key to save.');
+  const store = readKeyStore(dirs);
+  store[providerId] = apiKey.trim();
+  fs.mkdirSync(dirs.ghost, {recursive: true});
+  fs.writeFileSync(keyStorePath(dirs), JSON.stringify(store, null, 2), {mode: 0o600});
+  return {id: providerId, configured: true};
+}
+
+export function clearProviderKey(dirs, providerId) {
+  if (!PROVIDERS[providerId]) throw fail(`Unknown AI provider "${providerId}".`);
+  const store = readKeyStore(dirs);
+  delete store[providerId];
+  fs.mkdirSync(dirs.ghost, {recursive: true});
+  fs.writeFileSync(keyStorePath(dirs), JSON.stringify(store, null, 2), {mode: 0o600});
+  return {id: providerId, configured: Boolean(process.env[PROVIDERS[providerId].envKey])};
+}
+
+// Resolves the key to use, preferring an explicit one, then the env var, then the store.
+export function resolveKey(dirs, providerId, apiKey) {
+  const info = PROVIDERS[providerId];
+  if (!info) throw fail(`Unknown AI provider "${providerId}".`);
+  return (apiKey && apiKey.trim()) || process.env[info.envKey] || (dirs ? readKeyStore(dirs)[providerId] : '') || '';
+}
+
+export function listProviders(dirs) {
+  const store = dirs ? readKeyStore(dirs) : {};
+  return Object.entries(PROVIDERS).map(([id, info]) => {
+    const fromEnv = Boolean(process.env[info.envKey]);
+    const fromStore = Boolean(store[id]);
+    return {
+      id, label: info.label, model: info.defaultModel, envKey: info.envKey, keysUrl: info.keysUrl,
+      configured: fromEnv || fromStore, source: fromEnv ? 'environment' : fromStore ? 'saved in this project' : 'not set',
+    };
+  });
+}
+
+// Sends the smallest possible real request so a key can be verified without
+// running a whole improvement cycle.
+export async function testProvider(providerId, {dirs, apiKey, model, fetchImpl, baseUrl, signal} = {}) {
+  const info = PROVIDERS[providerId];
+  if (!info) throw fail(`Unknown AI provider "${providerId}".`);
+  const key = resolveKey(dirs, providerId, apiKey);
+  if (!key) throw fail(`${info.label} is not configured. Save an API key for it, or set ${info.envKey}.`, 409);
+  const started = Date.now();
+  const reply = await callProvider(providerId, {
+    apiKey: key, model, fetchImpl, baseUrl, signal,
+    systemPrompt: 'You are a connectivity check. Reply with exactly: OK',
+    userPrompt: 'Reply with exactly: OK',
+  });
+  return {ok: true, provider: providerId, label: info.label, model: model || info.defaultModel, latencyMs: Date.now() - started, reply: reply.trim().slice(0, 200)};
 }
 
 function focusPath(dirs) { return path.join(dirs.ghost, 'self-improve-focus.json'); }
@@ -65,7 +124,7 @@ export async function callProvider(providerId, {apiKey, model, systemPrompt, use
   const info = PROVIDERS[providerId];
   if (!info) throw fail(`Unknown AI provider "${providerId}".`);
   const key = apiKey || process.env[info.envKey];
-  if (!key) throw fail(`${info.label} is not configured. Set the ${info.envKey} environment variable.`, 409);
+  if (!key) throw fail(`${info.label} is not configured. Save an API key for it, or set the ${info.envKey} environment variable.`, 409);
   const response = await fetchImpl(`${baseUrl || info.baseUrl}/chat/completions`, {
     method: 'POST', signal,
     headers: {'Content-Type': 'application/json', Authorization: `Bearer ${key}`},
@@ -154,7 +213,7 @@ export async function runCycle({codeRoot, dirs, providerId, apiKey, model, testG
     addWorktree(codeRoot, tmpDir, branch);
     const files = buildRepoSummary(tmpDir);
     const userPrompt = `Focus task: ${focusState.focus}\n\nRepository files (relative paths):\n${files.join('\n')}\n\nPropose the smallest safe change that makes progress on the focus task.`;
-    const raw = await callProvider(providerId, {apiKey, model, systemPrompt: SYSTEM_PROMPT, userPrompt, fetchImpl, baseUrl});
+    const raw = await callProvider(providerId, {apiKey: resolveKey(dirs, providerId, apiKey), model, systemPrompt: SYSTEM_PROMPT, userPrompt, fetchImpl, baseUrl});
     const proposal = parseProposal(raw);
     report.summary = proposal.summary;
     report.applied = applyProposal(tmpDir, proposal);

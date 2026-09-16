@@ -4,3 +4,12 @@
 
 .git-view,.selfimprove-view{padding:0 30px 35px;overflow:auto}.git-toolbar{display:flex;align-items:center;gap:14px;margin-bottom:12px}.git-status-list{display:flex;flex-direction:column;gap:4px;margin-bottom:10px}.git-commit-row{display:flex;gap:10px;margin:14px 0}.git-commit-row input{flex:1;background:#202528;border:1px solid #39413e;color:#c5d0c1;border-radius:7px;padding:9px 12px;font-size:11px}.git-log{display:flex;flex-direction:column}.selfimprove-config,.selfimprove-run{display:flex;flex-wrap:wrap;gap:14px;align-items:flex-end;background:#22272a;padding:17px;border:1px solid #363f3b;border-radius:8px;margin-bottom:16px}.selfimprove-config label,.selfimprove-run label{flex:1;min-width:220px;font-size:8px;letter-spacing:1px;color:var(--muted)}.selfimprove-config textarea{width:100%;margin-top:8px;background:#202528;border:1px solid #39413e;color:#c5d0c1;border-radius:7px;padding:10px;font-size:11px;line-height:1.7}.selfimprove-run select{display:block;margin-top:8px;font-size:11px}.si-history{display:flex;flex-direction:column}
 
+
+.selfimprove-key{display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin:8px 0}
+.selfimprove-key label{display:flex;flex-direction:column;gap:6px;flex:1;min-width:260px;font-size:11px;letter-spacing:.08em;color:var(--muted)}
+.selfimprove-key input{padding:9px 11px;border-radius:8px;border:1px solid var(--line);background:var(--panel);color:var(--text);font:inherit}
+.si-providers{display:flex;flex-direction:column;gap:6px;margin-top:10px}
+.si-provider-row{display:flex;align-items:center;gap:10px;padding:8px 11px;border:1px solid var(--line);border-radius:8px;background:var(--panel)}
+.si-provider-row a{margin-left:auto;text-decoration:none}
+.si-provider-dot{width:8px;height:8px;border-radius:50%;background:var(--line);flex:none}
+.si-provider-dot.on{background:#3fb950}

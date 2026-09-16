@@ -81,6 +81,16 @@
           <button id="si-run" class="primary-button">Run one cycle</button>
           <span id="si-run-status" class="memory-help"></span>
         </div>
+        <h3 class="memory-title">Connect a public AI</h3>
+        <p class="memory-help">Paste an API key for the selected provider. Keys are stored only in this project's gitignored <code>.ghost/</code> folder and are never sent anywhere except that provider. An <code>envKey</code> environment variable, if set, takes priority.</p>
+        <div class="selfimprove-key">
+          <label>API KEY<input id="si-key" type="password" autocomplete="off" placeholder="Paste the key for the selected provider"></label>
+          <button id="si-save-key" class="secondary-button">Save key</button>
+          <button id="si-test" class="secondary-button">Test connection</button>
+          <button id="si-clear-key" class="secondary-button">Remove key</button>
+        </div>
+        <p id="si-key-status" class="memory-help"></p>
+        <div id="si-providers" class="si-providers"></div>
         <h3 class="memory-title">Cycle history</h3>
         <div id="si-history" class="si-history"></div>
       </section>
